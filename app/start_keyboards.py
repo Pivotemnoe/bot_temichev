@@ -1,0 +1,6 @@
+BTN_START_BEGIN = "Начать настройку"
+BTN_START_AGREE = "✔️ Согласен"
+BTN_START_DECLINE = "✖️ Не согласен"
+BTN_START_ADD_PET = "🐾 Добавить питомца"
+BTN_START_SKIP = "Пропустить"
+BTN_START_MAIN_MENU = "⬅️ В главное меню"

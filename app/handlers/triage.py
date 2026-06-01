@@ -1,0 +1,411 @@
+# app/handlers/triage.py
+
+from __future__ import annotations
+
+import asyncio
+import html
+import re
+import logging
+from typing import Dict, Optional
+
+from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
+
+from app.db import (
+    get_user_by_telegram_id,
+    get_pets_for_user,
+    get_pet_by_id,
+    try_consume_quota,
+    log_triage_event,
+    get_triage_history_for_user,
+    add_pet_history_event,
+)
+from app.keyboards import main_menu_kb, choose_pet_kb, age_group_kb, duration_kb, subscription_kb
+from app.llm_engine import call_triage_llm
+from app.states import TriageStates
+from app.triage_texts import (
+    TRIAGE_SUBSCRIPTION_HINT,
+    TRIAGE_HISTORY_EMPTY,
+    TRIAGE_HISTORY_HEADER,
+    TRIAGE_HISTORY_PET_FALLBACK,
+    TRIAGE_START_NEED_USER,
+    TRIAGE_START_NO_PETS,
+    TRIAGE_START_INTRO,
+    TRIAGE_CHOOSE_PET_INTRO,
+    TRIAGE_CHOOSE_PET_FAIL,
+    TRIAGE_ASK_AGE,
+    TRIAGE_ASK_DURATION,
+    TRIAGE_ASK_COMPLAINT,
+    TRIAGE_EMPTY_COMPLAINT,
+    TRIAGE_CANCELLED_BY_USER,
+    TRIAGE_QUOTA_EXHAUSTED,
+    TRIAGE_PROCESSING_TEXT,
+    TRIAGE_ERROR_TEXT,
+)
+
+from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
+from app.services.pet_observation_service import add_observation
+
+
+
+logger = logging.getLogger(__name__)
+router = Router()
+
+
+
+def _extract_urgency(response_text: str) -> tuple[str | None, str | None]:
+    """Try to extract urgency emoji and label from LLM response.
+
+    Supports patterns:
+    - 'Уровень срочности: 🟢 ...'
+    - 'Срочность: 🟡 ...'
+    - with optional numbering like '2) Уровень срочности: ...'
+    """
+    if not response_text:
+        return None, None
+
+    # 1) Primary patterns
+    m = re.search(
+        r"(?:^|\n)\s*(?:\d+\)\s*)?(?:Уровень\s+срочности|Срочность)\s*:\s*([🟢🟡🔴])\s*([^\n\r]+)",
+        response_text,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1), m.group(2).strip()
+
+    # 2) Fallback: any of the emojis at start of a line followed by text
+    m = re.search(r"(?:^|\n)\s*([🟢🟡🔴])\s*([^\n\r]{3,})", response_text)
+    if m:
+        return m.group(1), m.group(2).strip()
+
+    return None, None
+
+
+def _extract_short_summary(response_text: str) -> str | None:
+    """Extract a short summary (1-liner) from the LLM response.
+
+    Prefer the 'Кратко:' section, otherwise take the first non-empty line.
+    """
+    if not response_text:
+        return None
+
+    m = re.search(r"(?:^|\n)\s*(?:\d+\)\s*)?Кратко\s*:\s*([^\n\r]+)", response_text, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+
+    for line in response_text.splitlines():
+        line = line.strip()
+        if line:
+            line = re.sub(r"^\d+\)\s*", "", line)
+            return line[:180]
+    return None
+
+
+def _pet_label(pet: Dict) -> str:
+    raw_type = (pet.get("pet_type") or "").strip().lower()
+    name = (pet.get("pet_name") or "").strip() or "(без имени)"
+    if "кот" in raw_type or "кошка" in raw_type or raw_type == "cat":
+        t = "🐱 Кошка"
+    elif "соб" in raw_type or raw_type == "dog":
+        t = "🐶 Собака"
+    else:
+        t = pet.get("pet_type") or "Питомец"
+    return f"{t} — {name}"
+
+
+def _is_cancel(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return t in {"отменить", "⬅️ в главное меню".lower()}
+
+
+@router.message(F.text.in_(("❤️ Здоровье", "🩺 Разобрать жалобу")))
+async def triage_entry(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_entry user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    """Вход в triage."""
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer(TRIAGE_START_NEED_USER, reply_markup=main_menu_kb())
+        return
+
+    pets = get_pets_for_user(user["id"])
+    if not pets:
+        await message.answer(TRIAGE_START_NO_PETS, reply_markup=main_menu_kb())
+        return
+
+    await state.clear()
+
+    # Если питомец один — пропускаем выбор.
+    if len(pets) == 1:
+        pet = pets[0]
+        await state.update_data(pet_id=int(pet["id"]))
+        await message.answer(TRIAGE_START_INTRO)
+        await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
+        await state.set_state(TriageStates.asking_age)
+        return
+
+    labels = [_pet_label(p) for p in pets]
+    await state.update_data(
+        triage_pet_map={labels[i]: int(pets[i]["id"]) for i in range(len(pets))}
+    )
+
+    await message.answer(TRIAGE_START_INTRO)
+    await message.answer(TRIAGE_CHOOSE_PET_INTRO, reply_markup=choose_pet_kb(labels))
+    await state.set_state(TriageStates.choosing_pet)
+
+
+@router.message(TriageStates.choosing_pet)
+async def triage_choose_pet(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_choose_pet user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    text = (message.text or "").strip()
+    if _is_cancel(text):
+        await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    mapping: Dict[str, int] = data.get("triage_pet_map") or {}
+    pet_id = mapping.get(text)
+
+    if not pet_id:
+        await message.answer(TRIAGE_CHOOSE_PET_FAIL)
+        return
+
+    await state.update_data(pet_id=int(pet_id))
+    await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
+    await state.set_state(TriageStates.asking_age)
+
+
+@router.message(TriageStates.asking_age)
+async def triage_ask_age(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_ask_age user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    text = (message.text or "").strip()
+    if _is_cancel(text):
+        await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    # Разрешаем пользовательский ввод, но кнопки — предпочтительны.
+    await state.update_data(age_info=text)
+    await message.answer(TRIAGE_ASK_DURATION, reply_markup=duration_kb())
+    await state.set_state(TriageStates.asking_duration)
+
+
+@router.message(TriageStates.asking_duration)
+async def triage_ask_duration(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_ask_duration user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    text = (message.text or "").strip()
+    if _is_cancel(text):
+        await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    await state.update_data(duration_info=text)
+    await message.answer(TRIAGE_ASK_COMPLAINT, reply_markup=None)
+    await state.set_state(TriageStates.waiting_for_complaint)
+
+
+@router.message(TriageStates.waiting_for_complaint)
+async def triage_get_complaint(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_get_complaint user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    text = (message.text or "").strip()
+    if _is_cancel(text):
+        await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    if not text:
+        await message.answer(TRIAGE_EMPTY_COMPLAINT)
+        return
+
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer(TRIAGE_START_NEED_USER, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    ok, sub = try_consume_quota(user["id"], amount=1)
+    if not ok:
+        await message.answer(TRIAGE_QUOTA_EXHAUSTED, reply_markup=subscription_kb())
+        await state.clear()
+        return
+
+    quota_before = int(sub.get("quota_used", 0)) - 1
+    quota_after = int(sub.get("quota_used", 0))
+
+    data = await state.get_data()
+    pet_id = data.get("pet_id")
+    age_info = data.get("age_info")
+    duration_info = data.get("duration_info")
+
+    pets = get_pets_for_user(user["id"])
+    main_pet: Optional[Dict] = get_pet_by_id(int(pet_id)) if pet_id else None
+
+    await message.answer(TRIAGE_PROCESSING_TEXT)
+
+    try:
+        response_text = await asyncio.to_thread(
+            call_triage_llm,
+            user=user,
+            pets=pets,
+            complaint_text=text,
+            main_pet=main_pet,
+            age_info=age_info,
+            duration_info=duration_info,
+            plan_code=(sub.get("plan_code") or sub.get("plan") or "free"),
+        )
+    except (TimeoutError, asyncio.TimeoutError) as e:
+        logger.warning("Triage LLM timeout: %s", e)
+        await message.answer(
+            "Ответ задерживается из‑за нагрузки или проблем сети.\n\n"
+            "Попробуйте ещё раз через минуту или опишите жалобу короче.",
+            reply_markup=main_menu_kb(),
+        )
+        await state.clear()
+        return
+    except Exception as e:
+        logger.exception("Triage LLM failed: %s", e)
+        await message.answer(TRIAGE_ERROR_TEXT, reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    # Лог в БД + мягкий paywall (если подходит сценарий)
+    try:
+        log_triage_event(
+            user_id=int(user["id"]),
+            pet_id=int(pet_id) if pet_id else None,
+            complaint_text=text,
+            response_text=response_text,
+            quota_before=quota_before,
+            quota_after=quota_after,
+            urgency_level=None,
+        )
+    except Exception as e:
+        logger.warning("Failed to log triage: %s", e)
+
+    try:
+        decision = maybe_show_subscription_offer(
+            int(user["id"]),
+            "TRIAGE_COMPLETED",
+            ctx={"pet_id": int(pet_id)} if pet_id else {},
+        )
+    except Exception:
+        decision = None
+
+    # LLM может вернуть строки с символами '<' и '>' (например '<24'), что ломает HTML parse_mode в Telegram.
+    # Поэтому экранируем ответ перед отправкой.
+    safe_response_text = html.escape(response_text)
+    await message.answer(safe_response_text, reply_markup=main_menu_kb())
+
+    # Записываем событие triage в наблюдения (короткое резюме для ленты)
+    if pet_id:
+        try:
+            urgency_emoji, urgency_label = _extract_urgency(response_text)
+            summary = _extract_short_summary(response_text)
+            add_observation(
+                user_id=int(user["id"]),
+                pet_id=int(pet_id),
+                obs_type="triage",
+                payload={
+                    "urgency_emoji": urgency_emoji,
+                    "urgency_label": urgency_label,
+                    "complaint": text,
+                    "summary": summary,
+                },
+                source="triage",
+            )
+        except Exception as e:
+            logger.warning("Failed to add triage observation: %s", e)
+
+    # Записываем triage также в единую историю питомца
+    if pet_id:
+        try:
+            urgency_emoji, urgency_label = _extract_urgency(response_text)
+            summary = _extract_short_summary(response_text)
+            add_pet_history_event(
+                pet_id=int(pet_id),
+                event_type="triage",
+                title=f"{urgency_emoji} {urgency_label}".strip(),
+                details=summary or None,
+                metadata={
+                    "complaint": text,
+                    "summary": summary,
+                    "urgency_label": urgency_label,
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to add triage history event: %s", e)
+
+
+
+    if decision == DECISION_SOFT:
+        await message.answer(
+            TRIAGE_SUBSCRIPTION_HINT,
+            reply_markup=subscription_kb(),
+        )
+
+    await state.clear()
+
+
+@router.message(F.text.in_(("📜 История здоровья", "📜 История по здоровью")))
+async def triage_history(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_history user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    """Краткая история triage (последние записи)."""
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer(TRIAGE_START_NEED_USER, reply_markup=main_menu_kb())
+        return
+
+    items = get_triage_history_for_user(user["id"], limit=10)
+    if not items:
+        await message.answer(
+            TRIAGE_HISTORY_EMPTY,
+            reply_markup=main_menu_kb(),
+        )
+        return
+
+    lines = [TRIAGE_HISTORY_HEADER, ""]
+    pets = {int(p["id"]): p for p in get_pets_for_user(user["id"])}
+    for it in items:
+        created = (it.get("created_at") or "").strip()
+        pet_id = it.get("pet_id")
+        pet = pets.get(int(pet_id)) if pet_id is not None else None
+        pet_name = _pet_label(pet) if pet else TRIAGE_HISTORY_PET_FALLBACK
+        complaint = (it.get("complaint_text") or "").strip()
+        lines.append(f"🗓 <b>{html.escape(created)}</b>")
+        lines.append(f"🐾 <b>{html.escape(pet_name)}</b>")
+        lines.append(f"📝 {html.escape(complaint[:240])}")
+        lines.append("—" * 18)
+
+    await message.answer("\n".join(lines), reply_markup=main_menu_kb())
+    await state.clear()
