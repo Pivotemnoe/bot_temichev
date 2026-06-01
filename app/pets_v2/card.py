@@ -98,6 +98,7 @@ from app.db import (
     delete_pet,
 )
 from app.services.safe_edit import safe_edit_message
+from app.services.analytics import EVENT_PET_SET_MAIN, track_event
 
 router = Router()
 
@@ -513,6 +514,7 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
 
     if action == "set_main":
         if set_main_pet(user["id"], pet_id):
+            track_event(user["id"], EVENT_PET_SET_MAIN, {"pet_id": int(pet_id)})
             updated_pet = _normalize_pet(get_pet_by_id(pet_id))
             text = _build_overview_text(updated_pet, owner_id=user["id"])
             await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))

@@ -26,6 +26,7 @@ from app.keyboards_reminders import reminders_menu_kb
 from app.keyboards_knowledge import faq_menu_kb
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
 from app.services.static_assets import send_static_photo
+from app.services.analytics import EVENT_PAY_CLICKED, track_event
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,9 @@ async def change_subscription_plan(message: Message):
             reply_markup=subscription_kb(),
         )
         return
+
+    if plan_code != "free":
+        track_event(user["id"], EVENT_PAY_CLICKED, {"plan_code": plan_code, "reason": "subscription"})
 
     set_subscription_plan(user["id"], plan_code)
     sub = get_subscription(user["id"])

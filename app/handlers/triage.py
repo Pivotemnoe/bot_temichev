@@ -49,6 +49,12 @@ from app.services.pet_observation_service import add_observation
 from app.services.static_assets import send_static_photo
 from app.services.paywall import send_plus_paywall_explained
 from app.services.followup import create_followup_for_triage
+from app.services.analytics import (
+    EVENT_TRIAGE_COMPLETED,
+    EVENT_TRIAGE_STARTED,
+    prompt_mode_for_plan,
+    track_event,
+)
 
 
 
@@ -177,6 +183,7 @@ async def start_triage_flow(message: Message, state: FSMContext, telegram_id: in
     if len(pets) == 1:
         pet = pets[0]
         await state.update_data(pet_id=int(pet["id"]))
+        track_event(user["id"], EVENT_TRIAGE_STARTED, {"pet_id": int(pet["id"])})
         await message.answer(TRIAGE_START_INTRO)
         await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
         await state.set_state(TriageStates.asking_age)
@@ -227,6 +234,9 @@ async def triage_choose_pet(message: Message, state: FSMContext):
         return
 
     await state.update_data(pet_id=int(pet_id))
+    user = get_user_by_telegram_id(message.from_user.id)
+    if user:
+        track_event(user["id"], EVENT_TRIAGE_STARTED, {"pet_id": int(pet_id)})
     await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
     await state.set_state(TriageStates.asking_age)
 
@@ -296,12 +306,13 @@ async def triage_get_complaint(message: Message, state: FSMContext):
 
     ok, sub = try_consume_quota(user["id"], amount=1)
     if not ok:
-        await send_plus_paywall_explained(message, reason_text=TRIAGE_QUOTA_EXHAUSTED)
+        await send_plus_paywall_explained(message, reason="limit", reason_text=TRIAGE_QUOTA_EXHAUSTED)
         await state.clear()
         return
 
     quota_before = int(sub.get("quota_used", 0)) - 1
     quota_after = int(sub.get("quota_used", 0))
+    plan_code = sub.get("plan_code") or sub.get("plan") or "free"
 
     data = await state.get_data()
     pet_id = data.get("pet_id")
@@ -358,6 +369,19 @@ async def triage_get_complaint(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.warning("Failed to log triage: %s", e)
+
+    if triage_log_id:
+        track_event(
+            int(user["id"]),
+            EVENT_TRIAGE_COMPLETED,
+            {
+                "pet_id": int(pet_id) if pet_id else None,
+                "urgency_level": urgency_level or "unknown",
+                "triage_log_id": int(triage_log_id),
+                "plan_code": plan_code,
+                "prompt_mode": prompt_mode_for_plan(plan_code),
+            },
+        )
 
     try:
         followup_result = create_followup_for_triage(

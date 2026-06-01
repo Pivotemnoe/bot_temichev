@@ -37,6 +37,29 @@ except ValueError:
     )
 
 
+def _parse_admin_ids(raw: str, fallback_admin_id: int) -> set[int]:
+    values: set[int] = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        item = part.strip()
+        if not item:
+            continue
+        try:
+            values.add(int(item))
+        except ValueError:
+            raise RuntimeError(
+                f"❌ ADMIN_IDS в .env должен содержать числа через запятую, сейчас: {repr(raw)}"
+            )
+
+    if fallback_admin_id:
+        values.add(int(fallback_admin_id))
+    return values
+
+
+# Telegram ID администраторов, которым доступен /admin dashboard.
+# Если ADMIN_IDS не задан, используем ADMIN_CHAT_ID для обратной совместимости.
+ADMIN_IDS = _parse_admin_ids(os.getenv("ADMIN_IDS", ""), ADMIN_CHAT_ID)
+
+
 # Чат/канал для обратной связи (по умолчанию совпадает с ADMIN_CHAT_ID)
 _feedback_raw = os.getenv("FEEDBACK_CHAT_ID", "").strip()
 if _feedback_raw:

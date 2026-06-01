@@ -77,15 +77,13 @@ Implemented in current working copy:
 - Knowledge base with `for_plans`.
 - Reminders.
 - Pet history and observations.
-- Basic `user_events` and subscription offer logs.
+- Onboarding UX and static banners.
+- Unified Plus paywall/trust copy.
+- Follow-up tables/service/runner/handlers.
+- Standardized E_SUITE `user_events` analytics and `/admin` dashboard.
 
 Not implemented or incomplete:
 
-- A/A2 onboarding and banners.
-- B2 triage history UX in pet overview and post-triage card button.
-- Unified C paywall/trust layer.
-- D/D2 follow-up tables/service/runner/handlers.
-- E SUITE standardized analytics events and admin dashboard.
 - P/PF prompt selector and Plus/Clinic addons.
 - Payment flow is absent in current working copy.
 
@@ -176,6 +174,40 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 5 E SUITE Analytics/Admin
+
+- Added standardized E_SUITE analytics events on top of existing `user_events`.
+- Added `app/services/analytics.py` for event constants, start payload parsing, plan/prompt payload enrichment, and safe event writes.
+- Added DB indexes for `user_events`, `triage_logs`, and subscription-offer reporting.
+- Added SQL aggregation helpers in `app/db.py`:
+  - `count_events`
+  - `counts_bundle`
+  - `funnel`
+  - `retention_d1_d7`
+  - `top_sources`
+  - `triage_tokens_stats`
+  - `triage_urgency_breakdown`
+  - `payments_sum`
+- Added Telegram `/admin` dashboard gated by `ADMIN_IDS`, with reports:
+  - today
+  - 7 days
+  - 30 days
+  - funnel
+  - subscriptions
+  - retention
+  - cost/workload proxy
+  - sources
+- Added `tools/check_phase5.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python tools/check_phase4.py`
+  - `.venv/bin/python tools/check_phase5.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched. `payment_success` aggregation is ready, but real payment callback integration remains Phase 8.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -224,12 +256,13 @@ Not implemented or incomplete:
 
 ### Phase 5 — E SUITE Analytics and Admin Dashboard
 
-1. Standardize `user_events` payloads; do not add `analytics_events`.
-2. Add `app_start`, `pet_created`, `triage_started`, `triage_completed`, `paywall_shown`, `pay_clicked`, `payment_success`, `followup_*`.
-3. Add indexes for `user_events` and `triage_logs`.
-4. Add DB aggregation functions.
-5. Add `/admin` dashboard gated by `ADMIN_IDS`.
-6. Add reports: today, 7 days, 30 days, funnel, subscriptions, retention, cost proxy, sources.
+1. Done: standardize `user_events` payloads; do not add `analytics_events`.
+2. Done: add `app_start`, `pet_created`, `triage_started`, `triage_completed`, `paywall_shown`, `pay_clicked`, `followup_*`.
+3. Done: keep `payment_success` aggregator/event constant ready for real payment callbacks in Phase 8.
+4. Done: add indexes for `user_events` and `triage_logs`.
+5. Done: add DB aggregation functions.
+6. Done: add `/admin` dashboard gated by `ADMIN_IDS`.
+7. Done: add reports: today, 7 days, 30 days, funnel, subscriptions, retention, cost proxy, sources.
 
 ### Phase 6 — Prompt Selector PF
 

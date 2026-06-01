@@ -259,6 +259,26 @@ def init_db():
             """
         )
 
+        # =================== Analytics indexes ===================
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_events_type_created ON user_events(event_type, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_events_user_created ON user_events(user_id, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_triage_logs_created ON triage_logs(created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_triage_logs_user_created ON triage_logs(user_id, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_triage_logs_pet_created ON triage_logs(pet_id, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscription_offer_logs_event_shown ON subscription_offer_logs(event_type, shown_at)"
+        )
+
         conn.commit()
 
 
@@ -1994,6 +2014,372 @@ def count_user_events(user_id: int, event_type: str, since_iso: str | None = Non
             )
         (cnt,) = cur.fetchone()
         return int(cnt or 0)
+
+
+def _analytics_iso(value: str | datetime) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def analytics_period_bounds(days: int) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=max(1, int(days)))
+    return start.isoformat(), now.isoformat()
+
+
+def count_events(
+    event_type: str,
+    date_from: str | datetime,
+    date_to: str | datetime,
+    filters: dict | None = None,
+) -> int:
+    where = ["event_type = ?", "created_at >= ?", "created_at < ?"]
+    params: list = [event_type, _analytics_iso(date_from), _analytics_iso(date_to)]
+
+    for key, value in (filters or {}).items():
+        if key == "user_id":
+            where.append("user_id = ?")
+            params.append(value)
+            continue
+        if not str(key).replace("_", "").isalnum():
+            continue
+        where.append(f"json_extract(payload, '$.{key}') = ?")
+        params.append(value)
+
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM user_events WHERE {' AND '.join(where)}",
+            tuple(params),
+        )
+        (cnt,) = cur.fetchone()
+    return int(cnt or 0)
+
+
+def counts_bundle(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    event_types = (
+        "app_start",
+        "triage_started",
+        "triage_completed",
+        "paywall_shown",
+        "pay_clicked",
+        "payment_success",
+        "followup_scheduled",
+        "followup_sent",
+        "followup_answered",
+        "pet_created",
+        "pet_set_main",
+    )
+    counts = {event_type: count_events(event_type, start, end) for event_type in event_types}
+
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(json_extract(payload, '$.plan_code'), ''), 'free'), COUNT(*)
+            FROM user_events
+            WHERE event_type = 'triage_completed'
+              AND created_at >= ?
+              AND created_at < ?
+            GROUP BY 1
+            """,
+            (start, end),
+        )
+        counts["triage_by_plan"] = {str(row[0] or "free"): int(row[1] or 0) for row in cur.fetchall()}
+    return counts
+
+
+def funnel(date_from: str | datetime, date_to: str | datetime) -> dict:
+    counts = counts_bundle(date_from, date_to)
+    keys = (
+        "app_start",
+        "triage_completed",
+        "paywall_shown",
+        "pay_clicked",
+        "payment_success",
+    )
+    return {key: int(counts.get(key, 0) or 0) for key in keys}
+
+
+def retention_d1_d7(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            WITH base AS (
+                SELECT DISTINCT user_id, date(created_at) AS cohort_day
+                FROM user_events
+                WHERE event_type = 'triage_completed'
+                  AND created_at >= ?
+                  AND created_at < ?
+            )
+            SELECT
+                COUNT(*) AS base_cohorts,
+                SUM(
+                    CASE WHEN EXISTS (
+                        SELECT 1
+                        FROM user_events e
+                        WHERE e.user_id = base.user_id
+                          AND e.event_type = 'triage_completed'
+                          AND date(e.created_at) = date(base.cohort_day, '+1 day')
+                    ) THEN 1 ELSE 0 END
+                ) AS d1_cohorts,
+                SUM(
+                    CASE WHEN EXISTS (
+                        SELECT 1
+                        FROM user_events e
+                        WHERE e.user_id = base.user_id
+                          AND e.event_type = 'triage_completed'
+                          AND date(e.created_at) > base.cohort_day
+                          AND date(e.created_at) <= date(base.cohort_day, '+7 day')
+                    ) THEN 1 ELSE 0 END
+                ) AS d7_cohorts
+            FROM base
+            """,
+            (start, end),
+        )
+        row = cur.fetchone() or (0, 0, 0)
+
+        cur.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT user_id)
+            FROM user_events
+            WHERE event_type = 'triage_completed'
+              AND created_at >= ?
+              AND created_at < ?
+            """,
+            (start, end),
+        )
+        triage_total, users_total = cur.fetchone() or (0, 0)
+
+        cur.execute(
+            """
+            SELECT
+                SUM(CASE WHEN event_type = 'followup_sent' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN event_type = 'followup_answered' THEN 1 ELSE 0 END)
+            FROM user_events
+            WHERE event_type IN ('followup_sent', 'followup_answered')
+              AND created_at >= ?
+              AND created_at < ?
+            """,
+            (start, end),
+        )
+        followup_sent, followup_answered = cur.fetchone() or (0, 0)
+
+    base_cohorts = int(row[0] or 0)
+    d1_cohorts = int(row[1] or 0)
+    d7_cohorts = int(row[2] or 0)
+    users_total = int(users_total or 0)
+    triage_total = int(triage_total or 0)
+    followup_sent = int(followup_sent or 0)
+    followup_answered = int(followup_answered or 0)
+    return {
+        "base_cohorts": base_cohorts,
+        "d1_cohorts": d1_cohorts,
+        "d7_cohorts": d7_cohorts,
+        "d1_rate": (d1_cohorts / base_cohorts) if base_cohorts else 0.0,
+        "d7_rate": (d7_cohorts / base_cohorts) if base_cohorts else 0.0,
+        "avg_triage_per_user": (triage_total / users_total) if users_total else 0.0,
+        "followup_answered_rate": (followup_answered / followup_sent) if followup_sent else 0.0,
+    }
+
+
+def top_sources(
+    date_from: str | datetime,
+    date_to: str | datetime,
+    group_by: str = "utm_source",
+    limit: int = 10,
+) -> list[dict]:
+    if group_by not in {"utm_source", "utm_campaign"}:
+        raise ValueError("group_by must be utm_source or utm_campaign")
+
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    key_path = f"$.{group_by}"
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            WITH first_start AS (
+                SELECT user_id, MIN(created_at) AS first_created_at
+                FROM user_events
+                WHERE event_type = 'app_start'
+                  AND created_at >= ?
+                  AND created_at < ?
+                GROUP BY user_id
+            ),
+            sources AS (
+                SELECT
+                    ue.user_id,
+                    COALESCE(
+                        NULLIF(json_extract(ue.payload, '{key_path}'), ''),
+                        CASE
+                            WHEN COALESCE(NULLIF(json_extract(ue.payload, '$.source_type'), ''), 'direct') = 'direct'
+                            THEN 'direct'
+                            ELSE 'unknown'
+                        END
+                    ) AS source_key,
+                    COALESCE(NULLIF(json_extract(ue.payload, '$.source_type'), ''), 'direct') AS source_type
+                FROM user_events ue
+                JOIN first_start fs
+                  ON fs.user_id = ue.user_id
+                 AND fs.first_created_at = ue.created_at
+                WHERE ue.event_type = 'app_start'
+            )
+            SELECT
+                source_key,
+                source_type,
+                COUNT(DISTINCT s.user_id) AS starts,
+                SUM(CASE WHEN e.event_type = 'triage_completed' THEN 1 ELSE 0 END) AS triage_completed,
+                SUM(CASE WHEN e.event_type = 'payment_success' THEN 1 ELSE 0 END) AS payment_success,
+                COALESCE(SUM(
+                    CASE WHEN e.event_type = 'payment_success'
+                    THEN CAST(COALESCE(json_extract(e.payload, '$.amount_rub'), 0) AS REAL)
+                    ELSE 0 END
+                ), 0) AS amount_rub
+            FROM sources s
+            LEFT JOIN user_events e
+              ON e.user_id = s.user_id
+             AND e.created_at >= ?
+             AND e.created_at < ?
+             AND e.event_type IN ('triage_completed', 'payment_success')
+            GROUP BY source_key, source_type
+            ORDER BY starts DESC, triage_completed DESC
+            LIMIT ?
+            """,
+            (start, end, start, end, int(limit)),
+        )
+        rows = cur.fetchall()
+
+    result: list[dict] = []
+    for row in rows:
+        starts = int(row[2] or 0)
+        payments = int(row[4] or 0)
+        result.append(
+            {
+                "source": row[0] or "unknown",
+                "source_type": row[1] or "direct",
+                "starts": starts,
+                "triage_completed": int(row[3] or 0),
+                "payment_success": payments,
+                "amount_rub": float(row[5] or 0),
+                "cr_to_pay": (payments / starts) if starts else 0.0,
+            }
+        )
+    return result
+
+
+def triage_tokens_stats(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(AVG(total_tokens), 0)
+            FROM triage_logs
+            WHERE created_at >= ?
+              AND created_at < ?
+            """,
+            (start, end),
+        )
+        row = cur.fetchone() or (0, 0, 0)
+    triage_count = int(row[0] or 0)
+    total_tokens = int(row[1] or 0)
+    avg_tokens = float(row[2] or 0)
+    return {
+        "triage_count": triage_count,
+        "total_tokens": total_tokens,
+        "avg_tokens_per_triage": avg_tokens,
+        "workload_index": triage_count + total_tokens / 1000.0,
+    }
+
+
+def triage_urgency_breakdown(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    result = {"green": 0, "yellow": 0, "red": 0, "unknown": 0}
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(LOWER(urgency_level), ''), 'unknown'), COUNT(*)
+            FROM triage_logs
+            WHERE created_at >= ?
+              AND created_at < ?
+            GROUP BY 1
+            """,
+            (start, end),
+        )
+        for key, cnt in cur.fetchall():
+            normalized = key if key in result else "unknown"
+            result[normalized] = result.get(normalized, 0) + int(cnt or 0)
+    return result
+
+
+def payments_sum(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CAST(COALESCE(json_extract(payload, '$.amount_rub'), 0) AS REAL)), 0)
+            FROM user_events
+            WHERE event_type = 'payment_success'
+              AND created_at >= ?
+              AND created_at < ?
+            """,
+            (start, end),
+        )
+        row = cur.fetchone() or (0, 0)
+    return {"count": int(row[0] or 0), "amount_rub": float(row[1] or 0)}
+
+
+def subscription_plan_breakdown() -> dict:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT plan, COUNT(*)
+            FROM subscriptions
+            GROUP BY plan
+            """
+        )
+        rows = cur.fetchall()
+    result = {"free": 0, "plus": 0, "pro": 0, "vip": 0}
+    for plan, cnt in rows:
+        result[str(plan or "free")] = int(cnt or 0)
+    return result
+
+
+def get_admin_dashboard_stats(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    return {
+        "period": {"from": start, "to": end},
+        "counts": counts_bundle(start, end),
+        "funnel": funnel(start, end),
+        "retention": retention_d1_d7(start, end),
+        "sources": {
+            "utm_source": top_sources(start, end, group_by="utm_source", limit=10),
+            "utm_campaign": top_sources(start, end, group_by="utm_campaign", limit=10),
+        },
+        "subscriptions": subscription_plan_breakdown(),
+        "tokens": triage_tokens_stats(start, end),
+        "urgency": triage_urgency_breakdown(start, end),
+        "payments": payments_sum(start, end),
+    }
 
 
 def mark_offer_shown(user_id: int, event_type: str, key: str | None = None, payload: dict | None = None) -> None:

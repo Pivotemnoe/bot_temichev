@@ -12,6 +12,7 @@ from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
 from app.pets_texts import PETS_ADD_START, PETS_ADD_CANCELLED, PETS_ADDED_SUCCESS
 from app.states import AddPetStates
 from app.constants import SUPPORTED_PETS
+from app.services.analytics import EVENT_PET_CREATED, track_event
 
 router = Router()
 
@@ -239,7 +240,12 @@ async def add_pet_set_name(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    create_pet(user["id"], pet_type, pet_name)
+    pet_id = create_pet(user["id"], pet_type, pet_name)
+    track_event(
+        user["id"],
+        EVENT_PET_CREATED,
+        {"pet_id": int(pet_id), "pet_type": pet_type},
+    )
     pets = get_pets_for_user(user["id"])
     pets_block = _format_pets_list(pets)
 

@@ -11,6 +11,7 @@ from app.db import (
     get_pet_history,
     has_recent_followup_for_user,
 )
+from app.services.analytics import EVENT_FOLLOWUP_SCHEDULED, track_event
 
 
 TRUST_PHRASE = "Этот ответ не заменяет очный осмотр ветеринарного врача"
@@ -113,6 +114,19 @@ def create_followup_for_triage(
     )
     if not followup_id:
         return {"created": False, "reason": "insert_conflict"}
+
+    track_event(
+        int(user_id),
+        EVENT_FOLLOWUP_SCHEDULED,
+        {
+            "followup_id": int(followup_id),
+            "triage_log_id": int(triage_event_id),
+            "triage_event_id": int(triage_event_id),
+            "pet_id": int(pet_id) if pet_id else None,
+            "urgency_level": urgency,
+            "scenario": scenario,
+        },
+    )
 
     return {
         "created": True,

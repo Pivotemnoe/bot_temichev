@@ -25,6 +25,12 @@ from app.db import (
 from app.keyboards import main_menu_kb, pet_type_kb, skip_kb
 from app.states import RegistrationStates
 from app.constants import SUPPORTED_PETS
+from app.services.analytics import (
+    EVENT_APP_START,
+    EVENT_PET_CREATED,
+    parse_start_payload,
+    track_event,
+)
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -164,6 +170,7 @@ async def cmd_start(message: Message, state: FSMContext):
     tg_id = message.from_user.id
     user = get_user_by_telegram_id(tg_id)
     start_arg = _get_start_arg(message).lower()
+    start_payload = parse_start_payload(start_arg)
     from_channel = start_arg in {"promo", "channel", "from_channel"}
 
     # Пытаемся отправить логотип (для всех пользователей)
@@ -171,6 +178,7 @@ async def cmd_start(message: Message, state: FSMContext):
 
     # Вариант для уже зарегистрированных пользователей
     if user:
+        track_event(user["id"], EVENT_APP_START, start_payload)
         if from_channel:
             await message.answer(
                 f"Снова привет, {user['name']} 👋\n"
@@ -208,11 +216,11 @@ async def cmd_start(message: Message, state: FSMContext):
 
     text = "\n\n".join(intro_lines)
 
+    await state.clear()
+    await state.update_data(start_payload=start_payload)
     await message.answer(text, reply_markup=_welcome_kb())
     # Дополнительный короткий блок «Вопросы и ответы» сразу после онбординга
     await message.answer(_faq_after_start_text())
-
-    await state.clear()
 
 
 @router.message(F.text == "👤 Зарегистрироваться и добавить питомца")
@@ -336,15 +344,25 @@ async def reg_pet_name(message: Message, state: FSMContext):
     data = await state.get_data()
     name = data["name"]
     pet_type = data["pet_type"]
+    start_payload = data.get("start_payload") or parse_start_payload("")
 
     tg_id = message.from_user.id
     user = get_user_by_telegram_id(tg_id)
+    is_new_user = user is None
     if user is None:
         user_id = create_user(tg_id, name)
     else:
         user_id = user["id"]
 
-    create_pet(user_id, pet_type, pet_name)
+    if is_new_user:
+        track_event(user_id, EVENT_APP_START, start_payload)
+
+    pet_id = create_pet(user_id, pet_type, pet_name)
+    track_event(
+        user_id,
+        EVENT_PET_CREATED,
+        {"pet_id": int(pet_id), "pet_type": pet_type},
+    )
 
     pets = get_pets_for_user(user_id)
 

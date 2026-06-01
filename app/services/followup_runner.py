@@ -7,6 +7,7 @@ from aiogram import Bot
 
 from app.db import get_due_followups, mark_followup_sent
 from app.services.followup import followup_response_kb, render_followup_text
+from app.services.analytics import EVENT_FOLLOWUP_SENT, track_event
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,16 @@ async def _process_single_followup(bot: Bot, item: dict) -> None:
         return
 
     if mark_followup_sent(followup_id):
+        track_event(
+            int(user_id) if user_id else None,
+            EVENT_FOLLOWUP_SENT,
+            {
+                "followup_id": followup_id,
+                "triage_log_id": triage_event_id,
+                "triage_event_id": triage_event_id,
+                "scenario": scenario,
+            },
+        )
         logger.info("[followups_worker] sent followup_id=%s triage_event_id=%s", followup_id, triage_event_id)
     else:
         logger.warning("[followups_worker] sent_but_not_marked followup_id=%s", followup_id)

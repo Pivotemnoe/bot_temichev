@@ -51,6 +51,7 @@ from app.db import (
     get_subscription,
 )
 from app.constants import SUBSCRIPTION_BUTTONS, SUBSCRIPTION_PLANS, build_subscription_text
+from app.services.analytics import EVENT_PAY_CLICKED, track_event
 
 router = Router()
 
@@ -691,6 +692,9 @@ async def change_subscription_plan(message: Message):
             reply_markup=subscription_kb(),
         )
         return
+
+    if plan_code != "free":
+        track_event(user["id"], EVENT_PAY_CLICKED, {"plan_code": plan_code, "reason": "subscription"})
 
     set_subscription_plan(user["id"], plan_code)
     sub = get_subscription(user["id"])

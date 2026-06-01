@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery
 from app.db import get_followup_by_id, mark_followup_answered
 from app.handlers.triage import start_triage_flow
 from app.services.followup import render_followup_answer_text
+from app.services.analytics import EVENT_FOLLOWUP_ANSWERED, track_event
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,17 @@ async def followup_answer(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     mark_followup_answered(followup_id, answer)
+    track_event(
+        int(followup.get("user_id")) if followup.get("user_id") else None,
+        EVENT_FOLLOWUP_ANSWERED,
+        {
+            "followup_id": int(followup_id),
+            "triage_log_id": followup.get("triage_event_id"),
+            "triage_event_id": followup.get("triage_event_id"),
+            "scenario": followup.get("scenario"),
+            "answer_type": answer,
+        },
+    )
     logger.info(
         "[followup] answered followup_id=%s triage_event_id=%s answer=%s",
         followup_id,

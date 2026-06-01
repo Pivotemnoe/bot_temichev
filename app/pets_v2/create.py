@@ -18,6 +18,7 @@ from app.db import (
 from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb, onb_step3_kb
 from app.constants import SUPPORTED_PETS
 from app.pets_v2.card import show_pet_card
+from app.services.analytics import EVENT_PET_CREATED, track_event
 
 
 router = Router(name="pets_v2_create")
@@ -151,6 +152,11 @@ async def create_pet_v2_choose_name(message: Message, state: FSMContext):
         pet_name = raw[:64] if raw else None
 
     pet_id = create_pet(owner_id=int(user["id"]), pet_type=str(pet_type), pet_name=pet_name)
+    track_event(
+        user["id"],
+        EVENT_PET_CREATED,
+        {"pet_id": int(pet_id), "pet_type": str(pet_type)},
+    )
     await state.clear()
 
     await message.answer("✅ Питомец добавлен!", reply_markup=ReplyKeyboardRemove())

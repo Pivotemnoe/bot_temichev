@@ -148,7 +148,7 @@ async def _show_history(message: Message, user_id: int, pet_id: int, offset: int
         text = get_offer_text("HISTORY_OPENED", decision, {"total": total}) or (
             "Полная история разборов доступна в Plus. В Free показываем последние 3 разбора."
         )
-        await send_plus_paywall_explained(message, reason_text=text)
+        await send_plus_paywall_explained(message, reason="history", reason_text=text)
         return
 
     events = get_pet_history(pet_id=pet_id, limit=PAGE_SIZE, offset=offset, event_types=event_types)

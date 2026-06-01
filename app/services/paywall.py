@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from aiogram.types import Message
 
+from app.db import get_user_by_telegram_id
 from app.keyboards import plus_paywall_inline_kb
+from app.services.analytics import EVENT_PAYWALL_SHOWN, track_event
 from app.services.static_assets import send_static_photo
 
 
@@ -24,9 +26,17 @@ PAYWALL_TEXT = (
 async def send_plus_paywall(
     message: Message,
     *,
+    reason: str | None = None,
     back_callback_data: str = "open:main_menu",
     show_banner: bool = True,
 ) -> None:
+    try:
+        user = get_user_by_telegram_id(int(message.chat.id))
+        if user:
+            track_event(user["id"], EVENT_PAYWALL_SHOWN, {"reason": reason or "subscription"})
+    except Exception:
+        pass
+
     if show_banner:
         await send_static_photo(message, "subscription_banner.jpg")
 
@@ -47,4 +57,9 @@ async def send_plus_paywall_explained(
     text = (reason_text or reason or "").strip()
     if text:
         await message.answer(text)
-    await send_plus_paywall(message, back_callback_data=back_callback_data, show_banner=show_banner)
+    await send_plus_paywall(
+        message,
+        reason=reason,
+        back_callback_data=back_callback_data,
+        show_banner=show_banner,
+    )
