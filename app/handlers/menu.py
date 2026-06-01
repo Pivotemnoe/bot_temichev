@@ -6,7 +6,7 @@ import logging
 
 from aiogram import Router, F
 from aiogram.filters import StateFilter
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from app.keyboards import main_menu_kb, subscription_kb
@@ -113,11 +113,8 @@ async def menu_faq(message: Message):
 # ================= Моя подписка =================
 
 
-@router.message(F.text == "👤 Моя подписка")
-async def menu_subscription(message: Message, state: FSMContext):
-    _state = None
-    logger.info("[HANDLER] app/handlers/menu.py:menu_subscription user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
-    tg_id = message.from_user.id
+async def _send_subscription_screen(message: Message, state: FSMContext, telegram_id: int | None = None) -> None:
+    tg_id = telegram_id or message.from_user.id
     user = get_user_by_telegram_id(tg_id)
     if user is None:
         await message.answer(
@@ -127,7 +124,6 @@ async def menu_subscription(message: Message, state: FSMContext):
         return
 
     sub = ensure_default_subscription(user["id"])
-
     text = build_subscription_text(sub)
 
     data = await state.get_data()
@@ -138,6 +134,32 @@ async def menu_subscription(message: Message, state: FSMContext):
     await state.update_data(last_screen="subscription", subscription_last_hash=cur_hash)
 
     await message.answer(text, reply_markup=subscription_kb())
+
+
+@router.message(F.text == "👤 Моя подписка")
+async def menu_subscription(message: Message, state: FSMContext):
+    _state = None
+    logger.info("[HANDLER] app/handlers/menu.py:menu_subscription user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    await _send_subscription_screen(message, state)
+
+
+@router.callback_query(F.data == "open:subscription")
+async def callback_open_subscription(callback: CallbackQuery, state: FSMContext):
+    if callback.message is None:
+        await callback.answer()
+        return
+    await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "open:main_menu")
+async def callback_open_main_menu(callback: CallbackQuery, state: FSMContext):
+    if callback.message is None:
+        await callback.answer()
+        return
+    await state.clear()
+    await callback.message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
+    await callback.answer()
 
 
 @router.message(F.text == "⬅️ В главное меню")

@@ -98,14 +98,14 @@ async def create_pet_v2_choose_type(message: Message, state: FSMContext):
         await message.answer("Добавление питомца отменено.", reply_markup=main_menu_kb())
         return
 
-    # Нормализуем выбор типа
+    # Нормализуем выбор типа в тот же формат, который использует основной справочник.
     pet_type = None
     if "кот" in text.lower() or "кошка" in text.lower() or "🐱" in text:
-        pet_type = "cat"
+        pet_type = SUPPORTED_PETS["🐱 Кот/Кошка"]
     elif "собак" in text.lower() or "🐶" in text:
-        pet_type = "dog"
+        pet_type = SUPPORTED_PETS["🐶 Собака"]
 
-    if not pet_type or pet_type not in SUPPORTED_PETS:
+    if not pet_type or pet_type not in set(SUPPORTED_PETS.values()):
         await message.answer("Пожалуйста, выберите тип кнопкой ниже:", reply_markup=pet_type_kb())
         return
 

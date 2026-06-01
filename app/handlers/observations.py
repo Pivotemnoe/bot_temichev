@@ -153,7 +153,7 @@ async def open_observations_for_pet(message: Message, state: FSMContext, pet_id:
     await state.update_data(pet_id=pet_id)
 
     # Используем внутренний рендерер, чтобы формат был единый.
-    await _render_observations(message, pet, user)
+    await _render_observations(message, user_id=user["id"], pet=pet)
 
 
 

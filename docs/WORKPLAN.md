@@ -91,13 +91,24 @@ Not implemented or incomplete:
 
 ## High-Priority Bugs/Risks Found
 
-1. `app/pets_v2/create.py`: v2 pet creation normalizes to `cat/dog` but checks against `SUPPORTED_PETS` keys, likely blocking creation.
-2. `app/handlers/triage.py`: urgency parser searches red `🔴`, while prompt requires `🟥`.
-3. `triage_logs.urgency_level` is written as `None`.
-4. `triage_logs` and `pet_history` are not synchronized for older triage records.
-5. Paywall inline callbacks `open:subscription` / `open:main_menu` are referenced but no handlers are present.
-6. `app/db.py` fresh-schema SQL for reminders has `FOREIGN KEY(p_id)` typo.
-7. `app/handlers/observations.py` has an incorrect helper call in `open_observations_for_pet`.
+1. Fixed in Phase 1: `app/pets_v2/create.py` normalized v2 pet creation to supported pet values.
+2. Fixed in Phase 1: `app/handlers/triage.py` now parses prompt-required red `🟥` and legacy `🔴`.
+3. Fixed in Phase 1: `triage_logs.urgency_level` is populated as `green/yellow/red` when parsed.
+4. Fixed in Phase 1 for new records: triage writes now pass `triage_log_id` into `pet_history`.
+5. Fixed in Phase 1: paywall inline callbacks `open:subscription` / `open:main_menu` have handlers.
+6. Fixed in Phase 1: `app/db.py` fresh-schema SQL for reminders now references `pet_id`.
+7. Fixed in Phase 1: `app/handlers/observations.py` helper call now passes named `user_id` and `pet`.
+
+## Progress Log
+
+### 2026-06-01 — Phase 1 Stabilization
+
+- Changed only the working copy in `/Users/konstantin/Documents/темичев вет бот`.
+- Added `tools/check_phase1.py` for non-network checks.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+- Payment/VPS code was not touched.
 
 ## Work Plan
 
@@ -110,14 +121,14 @@ Not implemented or incomplete:
 
 ### Phase 1 — Stabilize Existing Product
 
-1. Fix Pets v2 creation type validation.
-2. Fix urgency extraction for `🟥` and normalize urgency to `green/yellow/red`.
-3. Store `urgency_level` in `triage_logs`.
-4. Make triage history writes capture `triage_log_id`.
-5. Add missing callback handlers for `open:subscription` and `open:main_menu`.
-6. Fix `observations.py` helper call.
-7. Fix fresh DB schema typo and add idempotent migrations where needed.
-8. Add a small non-network verification script/test for DB helpers and pure logic.
+1. Done: fix Pets v2 creation type validation.
+2. Done: fix urgency extraction for `🟥` and normalize urgency to `green/yellow/red`.
+3. Done: store `urgency_level` in `triage_logs`.
+4. Done: make triage history writes capture `triage_log_id` for new records.
+5. Done: add missing callback handlers for `open:subscription` and `open:main_menu`.
+6. Done: fix `observations.py` helper call.
+7. Done: fix fresh DB schema typo. No existing-data migration needed for this specific typo.
+8. Done: add a small non-network verification script for fresh schema and pure triage logic.
 
 ### Phase 2 — Backport Safe Product UX from Reference Zip
 

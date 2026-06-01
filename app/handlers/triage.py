@@ -53,6 +53,13 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+URGENCY_EMOJI_TO_LEVEL = {
+    "🟢": "green",
+    "🟡": "yellow",
+    "🟥": "red",
+    "🔴": "red",
+}
+
 
 def _extract_urgency(response_text: str) -> tuple[str | None, str | None]:
     """Try to extract urgency emoji and label from LLM response.
@@ -67,7 +74,7 @@ def _extract_urgency(response_text: str) -> tuple[str | None, str | None]:
 
     # 1) Primary patterns
     m = re.search(
-        r"(?:^|\n)\s*(?:\d+\)\s*)?(?:Уровень\s+срочности|Срочность)\s*:\s*([🟢🟡🔴])\s*([^\n\r]+)",
+        r"(?:^|\n)\s*(?:\d+\)\s*)?(?:Уровень\s+срочности|Срочность)\s*:\s*([🟢🟡🟥🔴])\s*([^\n\r]+)",
         response_text,
         flags=re.IGNORECASE,
     )
@@ -75,11 +82,17 @@ def _extract_urgency(response_text: str) -> tuple[str | None, str | None]:
         return m.group(1), m.group(2).strip()
 
     # 2) Fallback: any of the emojis at start of a line followed by text
-    m = re.search(r"(?:^|\n)\s*([🟢🟡🔴])\s*([^\n\r]{3,})", response_text)
+    m = re.search(r"(?:^|\n)\s*([🟢🟡🟥🔴])\s*([^\n\r]{3,})", response_text)
     if m:
         return m.group(1), m.group(2).strip()
 
     return None, None
+
+
+def _urgency_level_from_emoji(emoji: str | None) -> str | None:
+    if not emoji:
+        return None
+    return URGENCY_EMOJI_TO_LEVEL.get(emoji)
 
 
 def _extract_short_summary(response_text: str) -> str | None:
@@ -294,16 +307,21 @@ async def triage_get_complaint(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    urgency_emoji, urgency_label = _extract_urgency(response_text)
+    urgency_level = _urgency_level_from_emoji(urgency_emoji)
+    summary = _extract_short_summary(response_text)
+    triage_log_id = None
+
     # Лог в БД + мягкий paywall (если подходит сценарий)
     try:
-        log_triage_event(
+        triage_log_id = log_triage_event(
             user_id=int(user["id"]),
             pet_id=int(pet_id) if pet_id else None,
             complaint_text=text,
             response_text=response_text,
             quota_before=quota_before,
             quota_after=quota_after,
-            urgency_level=None,
+            urgency_level=urgency_level,
         )
     except Exception as e:
         logger.warning("Failed to log triage: %s", e)
@@ -325,8 +343,6 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     # Записываем событие triage в наблюдения (короткое резюме для ленты)
     if pet_id:
         try:
-            urgency_emoji, urgency_label = _extract_urgency(response_text)
-            summary = _extract_short_summary(response_text)
             add_observation(
                 user_id=int(user["id"]),
                 pet_id=int(pet_id),
@@ -334,8 +350,10 @@ async def triage_get_complaint(message: Message, state: FSMContext):
                 payload={
                     "urgency_emoji": urgency_emoji,
                     "urgency_label": urgency_label,
+                    "urgency_level": urgency_level,
                     "complaint": text,
                     "summary": summary,
+                    "triage_id": triage_log_id,
                 },
                 source="triage",
             )
@@ -345,17 +363,19 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     # Записываем triage также в единую историю питомца
     if pet_id:
         try:
-            urgency_emoji, urgency_label = _extract_urgency(response_text)
-            summary = _extract_short_summary(response_text)
+            title_parts = [part for part in (urgency_emoji, urgency_label) if part]
             add_pet_history_event(
                 pet_id=int(pet_id),
                 event_type="triage",
-                title=f"{urgency_emoji} {urgency_label}".strip(),
+                title=" ".join(title_parts) if title_parts else "Разбор жалобы",
                 details=summary or None,
+                triage_id=triage_log_id,
                 metadata={
                     "complaint": text,
                     "summary": summary,
+                    "urgency_emoji": urgency_emoji,
                     "urgency_label": urgency_label,
+                    "urgency_level": urgency_level,
                 },
             )
         except Exception as e:

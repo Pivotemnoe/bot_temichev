@@ -110,7 +110,7 @@ def init_db():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY(p_id) REFERENCES pets(id) ON DELETE SET NULL
+                FOREIGN KEY(pet_id) REFERENCES pets(id) ON DELETE SET NULL
             )
             """
         )
@@ -1844,4 +1844,3 @@ def get_pet_observations(pet_id: int, limit: int = 50) -> list[dict]:
             }
         )
     return res
-
