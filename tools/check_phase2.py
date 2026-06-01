@@ -32,7 +32,7 @@ from app.db import (
     set_main_pet,
 )
 from app.keyboards import onb_step1_kb, onb_step2_kb, onb_step3_kb, plus_paywall_inline_kb
-from app.pets_v2.card import _pet_reminders_kb
+from app.pets_v2.card import _pet_reminders_kb, _pet_vaccinations_kb
 from app.pets_v2.reminders import _periodicity_kb, reminders_edit_start
 
 
@@ -96,6 +96,9 @@ def check_keyboards() -> None:
 
     paywall = _callback_data(plus_paywall_inline_kb())
     assert {"open:subscription", "paywall_back:open:main_menu"} <= paywall
+
+    vaccinations = _callback_data(_pet_vaccinations_kb(7))
+    assert {"pet:vacc_add:7", "petcard:overview:7"} <= vaccinations
 
     empty_reminders = _callback_data(_pet_reminders_kb(7, has_reminders=False))
     assert {"petrem:add:7", "petcard:overview:7"} <= empty_reminders

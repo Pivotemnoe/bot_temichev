@@ -26,7 +26,7 @@ def _vacc_kb(pet_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить вакцинацию", callback_data=f"pet:vacc_add:{pet_id}")],
-            [InlineKeyboardButton(text="⬅️ В карточку", callback_data=f"pet:overview:{pet_id}")],
+            [InlineKeyboardButton(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")],
             [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="pet:back_to_menu")],
         ]
     )
@@ -51,8 +51,8 @@ async def _show_vaccinations(message: Message, pet: dict) -> None:
         return
 
     for v in vaccs[:30]:
-        title = v.get("name") or v.get("title") or "Вакцинация"
-        date = _fmt_dt(v.get("date") or v.get("vaccination_date") or v.get("done_at"))
+        title = v.get("vaccine_name") or v.get("name") or v.get("title") or "Вакцинация"
+        date = _fmt_dt(v.get("vaccinated_at") or v.get("date") or v.get("vaccination_date") or v.get("done_at"))
         lines.append(f"• {title} — {date}")
     await message.answer("\n".join(lines), reply_markup=_vacc_kb(pet["id"]))
 
@@ -88,6 +88,17 @@ async def pet_card_add_vaccination(callback: CallbackQuery, state: FSMContext):
         pet_id = int(callback.data.split(":")[-1])
     except Exception:
         await callback.answer("Некорректный идентификатор питомца.", show_alert=True)
+        return
+
+    user = get_user_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.message.answer("Сначала зарегистрируйтесь через /start.", reply_markup=main_menu_kb())
+        await callback.answer()
+        return
+
+    pet = next((p for p in get_user_pets(user["id"]) if p["id"] == pet_id), None)
+    if not pet:
+        await callback.answer("Питомец не найден.", show_alert=True)
         return
 
     await state.clear()
@@ -145,11 +156,10 @@ async def vacc_waiting_date(message: Message, state: FSMContext):
         await message.answer("Сначала зарегистрируйтесь через /start.", reply_markup=main_menu_kb())
         return
 
-    # если сигнатура отличается — ловим TypeError
     try:
-        add_pet_vaccination(pet_id=pet_id, name=name, date=iso, user_id=user["id"])
+        add_pet_vaccination(pet_id=pet_id, vaccine_name=name, vaccinated_at=iso)
     except TypeError:
-        add_pet_vaccination(pet_id, name, iso, user["id"])
+        add_pet_vaccination(pet_id, name, iso)
 
     # пишем событие в единую историю питомца
     try:

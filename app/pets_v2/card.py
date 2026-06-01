@@ -320,6 +320,14 @@ def _pet_stats_kb(pet_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def _pet_vaccinations_kb(pet_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить вакцинацию", callback_data=f"pet:vacc_add:{pet_id}")
+    kb.button(text="⬅️ В карточку", callback_data=_cb("overview", pet_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def _pet_reminders_kb(pet_id: int, *, has_reminders: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить напоминание", callback_data=f"petrem:add:{pet_id}")
@@ -346,6 +354,21 @@ def _short_dt(value: str | None) -> str:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%d.%m")
     except Exception:
         return str(value)[:5] or "—"
+
+
+def _date_display_ru(value: str | None) -> str:
+    if not value:
+        return ""
+    s = str(value).strip()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).strftime("%d.%m.%Y")
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).strftime("%d.%m.%Y")
+    except Exception:
+        return s
 
 
 def _one_line(value: str | None, limit: int = 140) -> str:
@@ -560,11 +583,12 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
             lines.append("Пока нет записей о вакцинациях.")
         else:
             for row in v[:20]:
-                # tolerate different schemas
-                dt = row.get("date") or row.get("vaccination_date") or row.get("at") or ""
-                name = row.get("name") or row.get("vaccine") or row.get("title") or "вакцинация"
+                dt = _date_display_ru(
+                    row.get("vaccinated_at") or row.get("date") or row.get("vaccination_date") or row.get("at")
+                )
+                name = row.get("vaccine_name") or row.get("name") or row.get("vaccine") or row.get("title") or "вакцинация"
                 lines.append(f"• {name} — {dt}".rstrip(" —"))
-        await _safe_edit_text(callback.message, "\n".join(lines), reply_markup=_pet_card_kb(pet_id))
+        await _safe_edit_text(callback.message, "\n".join(lines), reply_markup=_pet_vaccinations_kb(pet_id))
         await _safe_callback_answer(callback)
         return
 
