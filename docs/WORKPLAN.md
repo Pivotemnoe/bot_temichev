@@ -84,6 +84,7 @@ Implemented in current working copy:
 - Aggregated CSV export from `/admin`.
 - Prompt selector with Base / Plus Expert / Clinic / Clinic Postop modes.
 - YooKassa Plus payment creation/check flow with env-only secrets and `payment_success` analytics.
+- Cleaned project tree: removed obsolete one-off migration/patch scripts and centralized duplicated plan limits.
 
 Not implemented or incomplete:
 
@@ -310,6 +311,20 @@ Not implemented or incomplete:
   - `.venv/bin/python -m compileall -q app tools main.py`
   - `.venv/bin/python -c "import main; print('main import ok')"`
 
+### 2026-06-01 — Phase 10 Project Tree Cleanup
+
+- Removed obsolete one-off scripts:
+  - `add_vip_to_for_plans.py`
+  - `migrate_db.py`
+  - old `sql/2025_12_09_pets_extended_fields.sql`
+  - old static `utils/calc_cost.py`
+- Replaced duplicate knowledge JSON checkers with one current `tools/check_knowledge_json.py`.
+- Moved old manual migration coverage into idempotent `init_db()` column checks.
+- Centralized pet limits in `app/constants.py` and removed duplicate `PLAN_PETS_LIMIT` definitions.
+- Updated VIP handling in subscription history/analytics limits.
+- Cleaned `docs/plans_matrix.md` from pasted chat-wrapper text and aligned it with current code.
+- Updated README structure and env notes.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -397,6 +412,13 @@ Not implemented or incomplete:
 1. Done: add optional aggregated CSV export to `/admin`.
 2. Done: keep export free of personal data and complaint text.
 3. Done: cover export with Phase 5 analytics checks.
+
+### Phase 10 — Cleanup
+
+1. Done: remove obsolete one-off scripts and stale SQL migration file.
+2. Done: move legacy DB migration safety into `init_db()`.
+3. Done: centralize duplicated pet limits.
+4. Done: clean docs/README references.
 
 ## Files to Ignore for Immediate Implementation
 

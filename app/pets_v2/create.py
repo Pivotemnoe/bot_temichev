@@ -16,7 +16,7 @@ from app.db import (
     ensure_default_subscription,
 )
 from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb, onb_step3_kb
-from app.constants import SUPPORTED_PETS
+from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
 from app.pets_v2.card import show_pet_card
 from app.services.analytics import EVENT_PET_CREATED, track_event
 
@@ -24,22 +24,12 @@ from app.services.analytics import EVENT_PET_CREATED, track_event
 router = Router(name="pets_v2_create")
 
 
-# Лимиты по количеству питомцев в зависимости от тарифа.
-# Значения синхронизированы с docs/plans_matrix.md (как и в legacy app/handlers/pets.py).
-PLAN_PETS_LIMIT: dict[str, int] = {
-    "free": 1,
-    "plus": 3,
-    "pro": 10,
-    "vip": 10,
-}
-
-
 def _get_plan_and_limits(user_id: int) -> tuple[str, int, int]:
     """Вернёт (plan_code, pets_limit, current_pets_count)."""
     sub = ensure_default_subscription(user_id)
     plan_code = (sub or {}).get("plan") or "free"
     pets = get_pets_for_user(user_id) or []
-    limit = PLAN_PETS_LIMIT.get(plan_code, PLAN_PETS_LIMIT["free"])
+    limit = PETS_LIMIT_BY_PLAN.get(plan_code, PETS_LIMIT_BY_PLAN["free"])
     return plan_code, limit, len(pets)
 
 

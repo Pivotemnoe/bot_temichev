@@ -48,6 +48,9 @@ def init_db():
             """
         )
         _ensure_column(cur, "users", "clinic_id", "INTEGER")
+        _ensure_column(cur, "users", "tariff", "TEXT DEFAULT 'free'")
+        _ensure_column(cur, "users", "quota", "INTEGER DEFAULT 5")
+        _ensure_column(cur, "users", "is_active", "INTEGER NOT NULL DEFAULT 1")
         # Питомцы
         cur.execute(
             """
@@ -70,6 +73,13 @@ def init_db():
             )
             """
         )
+        _ensure_column(cur, "pets", "birth_year", "INTEGER")
+        _ensure_column(cur, "pets", "birth_month", "INTEGER")
+        _ensure_column(cur, "pets", "birth_day", "INTEGER")
+        _ensure_column(cur, "pets", "birth_precision", "TEXT")
+        _ensure_column(cur, "pets", "sex", "TEXT")
+        _ensure_column(cur, "pets", "weight_kg", "REAL")
+        _ensure_column(cur, "pets", "breed", "TEXT")
         _ensure_column(cur, "pets", "is_main", "INTEGER NOT NULL DEFAULT 0")
         # Подписки
         cur.execute(
@@ -126,6 +136,10 @@ def init_db():
             )
             """
         )
+        _ensure_column(cur, "triage_logs", "prompt_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "completion_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "total_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "urgency_level", "TEXT")
         # Напоминания
         cur.execute(
             """

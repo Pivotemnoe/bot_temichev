@@ -6,12 +6,13 @@ PLANS: Dict[str, Dict[str, Any]] = {
     "free": {"history_limit": 3, "analytics_enabled": False},
     "plus": {"history_limit": 100, "analytics_enabled": True},
     "pro": {"history_limit": None, "analytics_enabled": True},
+    "vip": {"history_limit": None, "analytics_enabled": True},
 }
 
 def normalize_plan(plan: Optional[str]) -> str:
     p = (plan or "free").strip().lower()
-    if p in ("vip", "premium"):
-        return "pro"
+    if p == "premium":
+        return "vip"
     return p if p in PLANS else "free"
 
 def get_plan_limits(plan: Optional[str]) -> Dict[str, Any]:

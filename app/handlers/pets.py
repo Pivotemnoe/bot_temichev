@@ -11,24 +11,10 @@ from app.db import (
 from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
 from app.pets_texts import PETS_ADD_START, PETS_ADD_CANCELLED, PETS_ADDED_SUCCESS
 from app.states import AddPetStates
-from app.constants import SUPPORTED_PETS
+from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
 from app.services.analytics import EVENT_PET_CREATED, track_event
 
 router = Router()
-
-
-# Лимиты по количеству питомцев в зависимости от тарифа.
-# Значения синхронизированы с docs/plans_matrix.md:
-#   free — 1 питомец
-#   plus — до 2 питомцев
-#   pro  — до 5 питомцев
-#   vip  — до 10 питомцев
-PLAN_PETS_LIMIT = {
-    "free": 1,
-    "plus": 2,
-    "pro": 5,
-    "vip": 10,
-}
 
 
 def _get_plan_and_limits(user_id: int) -> tuple[str, int, int]:
@@ -41,7 +27,7 @@ def _get_plan_and_limits(user_id: int) -> tuple[str, int, int]:
     sub = ensure_default_subscription(user_id)
     plan_code = sub["plan"]
     pets = get_pets_for_user(user_id)
-    limit = PLAN_PETS_LIMIT.get(plan_code, PLAN_PETS_LIMIT["free"])
+    limit = PETS_LIMIT_BY_PLAN.get(plan_code, PETS_LIMIT_BY_PLAN["free"])
     return plan_code, limit, len(pets)
 
 

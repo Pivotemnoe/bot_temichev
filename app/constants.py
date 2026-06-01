@@ -129,3 +129,12 @@ TRIAGE_MODEL_ENV_BY_PLAN = {
     "pro":  "OPENAI_MODEL_PRO",    # например: gpt-5-mini
     "vip":  "OPENAI_MODEL_VIP",    # например: gpt-5
 }
+
+
+# Лимиты питомцев по тарифам. Единый источник для legacy pets и Pets v2.
+PETS_LIMIT_BY_PLAN = {
+    "free": 1,
+    "plus": 3,
+    "pro": 10,
+    "vip": 10,
+}
