@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import inspect
 from pathlib import Path
 
 
@@ -31,6 +32,8 @@ from app.db import (
     set_main_pet,
 )
 from app.keyboards import onb_step1_kb, onb_step2_kb, onb_step3_kb, plus_paywall_inline_kb
+from app.pets_v2.card import _pet_reminders_kb
+from app.pets_v2.reminders import _periodicity_kb, reminders_edit_start
 
 
 STATIC_FILES = [
@@ -94,12 +97,34 @@ def check_keyboards() -> None:
     paywall = _callback_data(plus_paywall_inline_kb())
     assert {"open:subscription", "paywall_back:open:main_menu"} <= paywall
 
+    empty_reminders = _callback_data(_pet_reminders_kb(7, has_reminders=False))
+    assert {"petrem:add:7", "petcard:overview:7"} <= empty_reminders
+    assert "petrem:editpick:7" not in empty_reminders
+
+    reminders = _callback_data(_pet_reminders_kb(7, has_reminders=True))
+    assert {"petrem:add:7", "petrem:editpick:7", "petrem:delpick:7", "petcard:overview:7"} <= reminders
+
+    edit_periodicity = _callback_data(_periodicity_kb(7, "edit"))
+    assert "petrem:edit:period:once:7" in edit_periodicity
+
+
+def check_reminder_callback_filters() -> None:
+    source = inspect.getsource(reminders_edit_start)
+    assert 'F.data.regexp(r"^petrem:edit:\\d+:\\d+$")' in source
+
+    reminders_module = __import__("app.pets_v2.reminders", fromlist=[""])
+    period_source = inspect.getsource(reminders_module.reminders_edit_periodicity)
+    notes_source = inspect.getsource(reminders_module.reminders_edit_notes)
+    assert "reminder_id" in period_source and "Редактирование было прервано" in period_source
+    assert "reminder_id" in notes_source and "Редактирование было прервано" in notes_source
+
 
 def main() -> None:
     try:
         check_static_files()
         check_main_pet_flow()
         check_keyboards()
+        check_reminder_callback_filters()
         print("phase2 checks ok")
     finally:
         Path(db_path).unlink(missing_ok=True)

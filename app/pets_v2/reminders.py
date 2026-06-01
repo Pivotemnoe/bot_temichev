@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -22,6 +23,21 @@ from app.db import (
 )
 
 router = Router()
+
+
+async def _safe_callback_answer(cb: CallbackQuery, text: str | None = None, *, show_alert: bool = False) -> None:
+    try:
+        if text is None:
+            await cb.answer()
+        else:
+            await cb.answer(text, show_alert=show_alert)
+    except TelegramBadRequest as e:
+        msg = str(e).lower()
+        if "query is too old" in msg or "response timeout expired" in msg or "query id is invalid" in msg:
+            return
+        return
+    except Exception:
+        return
 
 
 def _find_user_reminder(user_id: int, reminder_id: int) -> dict | None:
@@ -116,6 +132,13 @@ def _confirm_del_kb(reminder_id: int, pet_id: int) -> object:
     return kb.as_markup()
 
 
+def _back_to_reminders_kb(pet_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅️ К напоминаниям питомца", callback_data=f"petcard:reminders:{pet_id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 @router.callback_query(F.data.startswith("petrem:add:"))
 async def reminders_add_start(cb: CallbackQuery, state: FSMContext):
     user = get_user_by_telegram_id(cb.from_user.id)
@@ -182,24 +205,34 @@ async def reminders_add_time(msg: Message, state: FSMContext):
 async def reminders_add_periodicity(cb: CallbackQuery, state: FSMContext):
     user = get_user_by_telegram_id(cb.from_user.id)
     if not user:
-        await cb.answer("Нажмите /start", show_alert=True)
+        await _safe_callback_answer(cb, "Нажмите /start", show_alert=True)
         return
     parts = (cb.data or "").split(":")
     # petrem:create:period:<code>:<pet_id>
     if len(parts) != 5:
-        await cb.answer()
+        await _safe_callback_answer(cb)
         return
     _, _, _, code, pet_id_s = parts
     try:
         pet_id = int(pet_id_s)
     except ValueError:
-        await cb.answer()
+        await _safe_callback_answer(cb)
+        return
+
+    data = await state.get_data()
+    if not {"pet_id", "title", "due_date"} <= set(data):
+        await state.clear()
+        await cb.message.edit_text(
+            "Создание напоминания было прервано. Начните добавление заново из карточки питомца.",
+            reply_markup=_back_to_reminders_kb(pet_id),
+        )
+        await _safe_callback_answer(cb)
         return
 
     await state.update_data(periodicity=code)
     await state.set_state(ReminderV2States.entering_notes)
     await cb.message.edit_text("Добавьте заметку (или отправьте «-»):")
-    await cb.answer()
+    await _safe_callback_answer(cb)
 
 
 @router.message(ReminderV2States.entering_notes)
@@ -209,6 +242,10 @@ async def reminders_add_notes(msg: Message, state: FSMContext):
         await msg.answer("Нажмите /start")
         return
     data = await state.get_data()
+    if not {"pet_id", "title", "due_date", "periodicity"} <= set(data):
+        await state.clear()
+        await msg.answer("Создание напоминания было прервано. Начните добавление заново из карточки питомца.")
+        return
     pet_id = int(data["pet_id"])
     notes_raw = (msg.text or "").strip()
     notes = None if notes_raw in ("-", "—", "") else notes_raw
@@ -350,7 +387,7 @@ async def reminders_del_do(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("petrem:edit:"))
+@router.callback_query(F.data.regexp(r"^petrem:edit:\d+:\d+$"))
 async def reminders_edit_start(cb: CallbackQuery, state: FSMContext):
     user = get_user_by_telegram_id(cb.from_user.id)
     if not user:
@@ -419,6 +456,10 @@ async def reminders_edit_time(msg: Message, state: FSMContext):
             await state.update_data(due_time=due_time)
 
     data = await state.get_data()
+    if not {"reminder_id", "pet_id"} <= set(data):
+        await state.clear()
+        await msg.answer("Редактирование было прервано. Откройте карточку питомца и начните изменение заново.")
+        return
     pet_id = int(data["pet_id"])
     await state.set_state(ReminderV2States.editing_periodicity)
     await msg.answer("Выберите периодичность (или нажмите «Назад» для выхода):", reply_markup=_periodicity_kb(pet_id, "edit"))
@@ -429,13 +470,29 @@ async def reminders_edit_periodicity(cb: CallbackQuery, state: FSMContext):
     parts = (cb.data or "").split(":")
     # petrem:edit:period:<code>:<pet_id>
     if len(parts) != 5:
-        await cb.answer()
+        await _safe_callback_answer(cb)
         return
-    _, _, _, code, _pet_id_s = parts
+    _, _, _, code, pet_id_s = parts
+    try:
+        pet_id = int(pet_id_s)
+    except ValueError:
+        await _safe_callback_answer(cb)
+        return
+
+    data = await state.get_data()
+    if not {"reminder_id", "pet_id"} <= set(data):
+        await state.clear()
+        await cb.message.edit_text(
+            "Редактирование было прервано. Откройте напоминания питомца и начните изменение заново.",
+            reply_markup=_back_to_reminders_kb(pet_id),
+        )
+        await _safe_callback_answer(cb)
+        return
+
     await state.update_data(periodicity=code)
     await state.set_state(ReminderV2States.editing_notes)
     await cb.message.edit_text("Введите новую заметку или «-» чтобы оставить как есть (пусто = убрать):")
-    await cb.answer()
+    await _safe_callback_answer(cb)
 
 
 @router.message(ReminderV2States.editing_notes)
@@ -445,6 +502,10 @@ async def reminders_edit_notes(msg: Message, state: FSMContext):
         await msg.answer("Нажмите /start")
         return
     data = await state.get_data()
+    if not {"reminder_id", "pet_id"} <= set(data):
+        await state.clear()
+        await msg.answer("Редактирование было прервано. Откройте карточку питомца и начните изменение заново.")
+        return
     rid = int(data["reminder_id"])
     pet_id = int(data["pet_id"])
 

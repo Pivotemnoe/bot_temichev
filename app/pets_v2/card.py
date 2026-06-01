@@ -87,6 +87,7 @@ from app.db import (
     get_pet_history,
     list_pet_history,
     get_pet_observations,
+    get_pet_reminders,
     get_user_reminders,
     list_pet_vaccinations,
     list_pet_measurements,
@@ -317,6 +318,18 @@ def _pet_stats_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb.button(text="⬅️ Назад", callback_data=_cb("overview", pet_id))
     kb.adjust(1, 1, 1)
     return kb.as_markup()
+
+
+def _pet_reminders_kb(pet_id: int, *, has_reminders: bool = False) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить напоминание", callback_data=f"petrem:add:{pet_id}")
+    if has_reminders:
+        kb.button(text="✏️ Изменить напоминание", callback_data=f"petrem:editpick:{pet_id}")
+        kb.button(text="🗑 Удалить напоминание", callback_data=f"petrem:delpick:{pet_id}")
+    kb.button(text="⬅️ В карточку", callback_data=_cb("overview", pet_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
 
 def _confirm_delete_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
@@ -556,17 +569,29 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
         return
 
     if action == "reminders":
-        # show reminders for owner (not pet-specific in current schema)
-        rems = get_user_reminders(user["id"])
-        lines = [f"⏰ Напоминания — {_pet_title(pet)}", ""]
+        rems = get_pet_reminders(user["id"], pet_id)
+        lines = [f"⏰ Напоминания питомца — {_pet_title(pet)}", ""]
         if not rems:
-            lines.append("Напоминаний пока нет.")
+            lines.append(
+                "Для этого питомца напоминаний пока нет.\n"
+                "Нажмите «➕ Добавить напоминание», чтобы создать первое."
+            )
         else:
+            lines.append("Здесь показаны только напоминания по этому питомцу.")
+            lines.append("")
             for r in rems[:20]:
-                when = r.get("when") or r.get("date") or r.get("dt") or ""
-                text = r.get("text") or r.get("title") or "напоминание"
-                lines.append(f"• {when} — {text}".rstrip(" —"))
-        await _safe_edit_text(callback.message, "\n".join(lines), reply_markup=_pet_card_kb(pet_id))
+                date_text = r.get("due_date") or ""
+                time_text = r.get("due_time") or ""
+                when = " ".join(part for part in (date_text, time_text) if part).strip()
+                title = r.get("title") or "напоминание"
+                periodicity = r.get("periodicity") or ""
+                suffix = f" ({periodicity})" if periodicity and periodicity != "once" else ""
+                lines.append(f"• {when} — {title}{suffix}".rstrip(" —"))
+        await _safe_edit_text(
+            callback.message,
+            "\n".join(lines),
+            reply_markup=_pet_reminders_kb(pet_id, has_reminders=bool(rems)),
+        )
         await _safe_callback_answer(callback)
         return
 

@@ -14,6 +14,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from app.db import (
     get_user_by_telegram_id,
     get_pets_for_user,
+    get_pet_by_id,
     get_subscription,
     can_user_create_reminder,
     create_reminder,
@@ -176,6 +177,27 @@ def _build_pet_options(pets: List[Dict]) -> Dict[str, int]:
 
         options[label] = p["id"]
     return options
+
+
+def _reminder_pet_label(pet_id: int | str | None) -> str | None:
+    if not pet_id:
+        return None
+    try:
+        pet = get_pet_by_id(int(pet_id))
+    except Exception:
+        return None
+    if not pet:
+        return None
+
+    pet_type = pet.get("pet_type") or pet.get("type") or "питомец"
+    pet_name = pet.get("pet_name") or pet.get("name") or "(без имени)"
+    emoji = "🐾"
+    normalized_type = str(pet_type).strip().lower()
+    if normalized_type in ("cat", "кошка", "кот") or normalized_type.startswith("кош"):
+        emoji = "🐱"
+    elif normalized_type in ("dog", "собака", "пёс", "пес") or normalized_type.startswith("соб"):
+        emoji = "🐶"
+    return f"{emoji} {pet_type} — {pet_name}"
 
 
 # ===== Вход в модуль напоминаний (через команды) =====
@@ -557,6 +579,7 @@ async def reminders_list(message: Message, state: FSMContext) -> None:
         due_date = r.get("due_date") or "-"
         due_time = r.get("due_time") or ""
         periodicity = r.get("periodicity") or "once"
+        pet_label = _reminder_pet_label(r.get("pet_id"))
 
         type_label = {
             "vaccine": "Прививка",
@@ -567,8 +590,10 @@ async def reminders_list(message: Message, state: FSMContext) -> None:
         }.get(rtype, rtype)
 
         time_part = f" {due_time}" if due_time else ""
+        pet_part = f"Питомец: {pet_label}\n" if pet_label else ""
         text = (
             f"#{rid}: [{type_label}] {title}\n"
+            f"{pet_part}"
             f"Когда: {due_date}{time_part}, повтор: {periodicity}"
         )
 
