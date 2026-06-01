@@ -12,6 +12,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from app.config import BOT_TOKEN, LOG_LEVEL, ERROR_LOG_PATH
 from app.handlers.start import router as start_router
+from app.handlers.onboarding import router as onboarding_router
 from app.handlers.menu import router as menu_router
 from app.handlers.triage import router as triage_router
 from app.handlers.pets import router as pets_router
@@ -84,6 +85,7 @@ async def main():
 
     # 1) Старт и базовая регистрация
     dp.include_router(start_router)
+    dp.include_router(onboarding_router)
     dp.include_router(pets_router)
     dp.include_router(pets_v2_router)
     dp.include_router(triage_router)

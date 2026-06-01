@@ -77,10 +77,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardRemove
 
-from app.keyboards import main_menu_kb
+from app.keyboards import main_menu_kb, onb_step3_kb
 from app.db import (
     get_user_by_telegram_id,
     get_pet_by_id,
+    set_main_pet,
+    clear_main_pet,
     get_user_pets,
     list_pet_history,
     get_pet_observations,
@@ -277,12 +279,22 @@ def _pet_title(pet: dict) -> str:
         emoji = "🐱"
     elif str(ptype).lower().startswith("соб"):
         emoji = "🐶"
-    return f"{emoji} {ptype} — {name}"
+    prefix = "⭐ " if int(pet.get("is_main") or 0) == 1 else ""
+    return f"{prefix}{emoji} {ptype} — {name}"
 
 def _pet_card_kb(pet_id: int) -> InlineKeyboardMarkup:
     """Main inline keyboard for Pet Card."""
     kb = InlineKeyboardBuilder()
+    try:
+        is_main = int((get_pet_by_id(pet_id) or {}).get("is_main") or 0) == 1
+    except Exception:
+        is_main = False
+
     kb.button(text="📌 Обзор", callback_data=_cb("overview", pet_id))
+    if is_main:
+        kb.button(text="⭐ Снять основной", callback_data=_cb("unset_main", pet_id))
+    else:
+        kb.button(text="⭐ Сделать основным", callback_data=_cb("set_main", pet_id))
     kb.button(text="💉 Вакцинации", callback_data=_cb("vaccinations", pet_id))
     kb.button(text="⏰ Напоминания", callback_data=_cb("reminders", pet_id))
     kb.button(text="📊 Наблюдения", callback_data=_cb("observations", pet_id))
@@ -291,7 +303,7 @@ def _pet_card_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb.button(text="✏️ Изменить", callback_data=_cb("edit", pet_id))
     kb.button(text="🗑 Удалить", callback_data=_cb("delete", pet_id))
     kb.button(text="⬅️ В меню", callback_data=_cb("back_menu", pet_id))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2)
     return kb.as_markup()
 
 
@@ -455,6 +467,27 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
         await _safe_callback_answer(callback, "Питомец не найден", show_alert=True)
         return
 
+    if action == "set_main":
+        if set_main_pet(user["id"], pet_id):
+            updated_pet = _normalize_pet(get_pet_by_id(pet_id))
+            text = _build_overview_text(updated_pet, owner_id=user["id"])
+            await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))
+            await callback.message.answer("✅ Основной питомец выбран. Можно перейти к разбору жалобы.", reply_markup=onb_step3_kb())
+            await _safe_callback_answer(callback, "Основной питомец выбран")
+        else:
+            await _safe_callback_answer(callback, "Не удалось выбрать питомца", show_alert=True)
+        return
+
+    if action == "unset_main":
+        if clear_main_pet(user["id"]):
+            updated_pet = _normalize_pet(get_pet_by_id(pet_id))
+            text = _build_overview_text(updated_pet, owner_id=user["id"])
+            await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))
+            await _safe_callback_answer(callback, "Основной питомец снят")
+        else:
+            await _safe_callback_answer(callback, "Не удалось снять основной статус", show_alert=True)
+        return
+
     if action == "overview":
         text = _build_overview_text(pet, owner_id=user["id"])
         await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))
@@ -548,7 +581,7 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
         return
 
     if action == "delete_confirm":
-        delete_pet(pet_id)
+        delete_pet(user["id"], pet_id)
         await callback.message.answer(_render_text("✅ Питомец удалён."), reply_markup=main_menu_kb())
         try:
             await callback.message.delete()

@@ -25,6 +25,7 @@ from app.texts import PLAN_FREE_TEXT, PLAN_PLUS_TEMPLATE, PLAN_PRO_TEMPLATE, PLA
 from app.keyboards_reminders import reminders_menu_kb
 from app.keyboards_knowledge import faq_menu_kb
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
+from app.services.static_assets import send_static_photo
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ MAIN_MENU_BUTTONS = (
     "📅 Напоминания",
     "🐾 Питомцы",
     "➕ Добавить животное",
+    "🚀 Быстрый старт",
+    "🎯 Как пользоваться",
 )
 
 
@@ -133,6 +136,7 @@ async def _send_subscription_screen(message: Message, state: FSMContext, telegra
         return
     await state.update_data(last_screen="subscription", subscription_last_hash=cur_hash)
 
+    await send_static_photo(message, "subscription_banner.jpg")
     await message.answer(text, reply_markup=subscription_kb())
 
 
@@ -159,6 +163,21 @@ async def callback_open_main_menu(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await callback.message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("paywall_back:"))
+async def callback_paywall_back(callback: CallbackQuery, state: FSMContext):
+    if callback.message is None:
+        await callback.answer()
+        return
+
+    target = (callback.data or "").split(":", 1)[1]
+    if target == "open:subscription":
+        await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id)
+    else:
+        await state.clear()
+        await callback.message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
     await callback.answer()
 
 

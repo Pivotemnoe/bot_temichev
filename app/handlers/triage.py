@@ -46,6 +46,7 @@ from app.triage_texts import (
 
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
 from app.services.pet_observation_service import add_observation
+from app.services.static_assets import send_static_photo
 
 
 
@@ -132,16 +133,10 @@ def _is_cancel(text: str) -> bool:
     return t in {"отменить", "⬅️ в главное меню".lower()}
 
 
-@router.message(F.text.in_(("❤️ Здоровье", "🩺 Разобрать жалобу")))
-async def triage_entry(message: Message, state: FSMContext):
-    _state = None
-    try:
-        _state = await state.get_state()
-    except Exception:
-        _state = None
-    logger.info("[HANDLER] app/handlers/triage.py:triage_entry user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
-    """Вход в triage."""
-    user = get_user_by_telegram_id(message.from_user.id)
+async def start_triage_flow(message: Message, state: FSMContext, telegram_id: int | None = None) -> None:
+    """Start triage for a Telegram user, usable from message and callback flows."""
+    tg_id = telegram_id or message.from_user.id
+    user = get_user_by_telegram_id(tg_id)
     if not user:
         await message.answer(TRIAGE_START_NEED_USER, reply_markup=main_menu_kb())
         return
@@ -152,6 +147,7 @@ async def triage_entry(message: Message, state: FSMContext):
         return
 
     await state.clear()
+    await send_static_photo(message, "triage_banner.jpg")
 
     # Если питомец один — пропускаем выбор.
     if len(pets) == 1:
@@ -170,6 +166,18 @@ async def triage_entry(message: Message, state: FSMContext):
     await message.answer(TRIAGE_START_INTRO)
     await message.answer(TRIAGE_CHOOSE_PET_INTRO, reply_markup=choose_pet_kb(labels))
     await state.set_state(TriageStates.choosing_pet)
+
+
+@router.message(F.text.in_(("❤️ Здоровье", "🩺 Разобрать жалобу")))
+async def triage_entry(message: Message, state: FSMContext):
+    _state = None
+    try:
+        _state = await state.get_state()
+    except Exception:
+        _state = None
+    logger.info("[HANDLER] app/handlers/triage.py:triage_entry user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    """Вход в triage."""
+    await start_triage_flow(message, state)
 
 
 @router.message(TriageStates.choosing_pet)

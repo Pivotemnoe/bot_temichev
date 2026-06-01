@@ -110,6 +110,29 @@ Not implemented or incomplete:
   - `.venv/bin/python -m compileall -q app tools main.py`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 2 UX Backport
+
+- Selectively backported product UX from `temichevvet_С рабочий.zip`.
+- Added static banners from the reference archive:
+  - `onb_step1_add_pet.jpg`
+  - `onb_step2_set_main.jpg`
+  - `onb_step3_triage.jpg`
+  - `subscription_banner.jpg`
+  - `pets_banner.jpg`
+  - `triage_banner.jpg`
+- Added safe onboarding without wholesale copying the reference handlers.
+- Added `is_main` support for pets, with idempotent DB column migration in `init_db()`.
+- Added main-pet actions to the pet card.
+- Added subscription, pets, and triage banners.
+- Added unified Plus paywall helper, but did not wire payments.
+- Added `tools/check_phase2.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -132,10 +155,11 @@ Not implemented or incomplete:
 
 ### Phase 2 — Backport Safe Product UX from Reference Zip
 
-1. Review and selectively port static banners.
-2. Port onboarding texts/handlers only after adapting to current handlers.
-3. Port unified paywall service after ensuring callback handlers work.
-4. Avoid wholesale copying zip files because its schema and handlers diverge.
+1. Done: review and selectively port static banners.
+2. Done: port onboarding texts/handlers after adapting to current handlers.
+3. Done: port unified paywall service after ensuring callback handlers work.
+4. Done: avoid wholesale copying zip files because its schema and handlers diverge.
+5. Done: add `is_main` support needed by onboarding, with safe migration.
 
 ### Phase 3 — B2 and C Completion
 

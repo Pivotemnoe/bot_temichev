@@ -8,6 +8,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKe
 
 from app.db import get_user_by_telegram_id, get_pets_for_user
 from app.keyboards import main_menu_kb
+from app.services.static_assets import send_static_photo
 
 router = Router(name="pets_v2_list")
 
@@ -42,7 +43,8 @@ def _pet_label(pet: dict) -> str:
     """
     pet_type_ru = _pet_type_human(pet.get("pet_type"))
     name = pet.get("pet_name") or "(без имени)"
-    return f"{pet_type_ru} — {name}"
+    prefix = "⭐ " if int(pet.get("is_main") or 0) == 1 else ""
+    return f"{prefix}{pet_type_ru} — {name}"
 
 
 def _pets_list_kb(pets: list[dict]) -> ReplyKeyboardMarkup:
@@ -89,6 +91,7 @@ async def pets_list_handler(message: Message):
         return
 
     pets = get_pets_for_user(user["id"])
+    await send_static_photo(message, "pets_banner.jpg")
 
     if not pets:
         # Нет ни одного питомца — сразу предлагаем добавить первого.

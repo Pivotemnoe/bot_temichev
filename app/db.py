@@ -18,6 +18,16 @@ def get_connection() -> sqlite3.Connection:
 from .constants import SUBSCRIPTION_PLANS
 
 
+def _column_exists(cur: sqlite3.Cursor, table_name: str, column_name: str) -> bool:
+    cur.execute(f"PRAGMA table_info({table_name})")
+    return any(row[1] == column_name for row in cur.fetchall())
+
+
+def _ensure_column(cur: sqlite3.Cursor, table_name: str, column_name: str, ddl: str) -> None:
+    if not _column_exists(cur, table_name, column_name):
+        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
+
+
 def init_db():
     """Создать таблицы, если их ещё нет."""
     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -53,10 +63,12 @@ def init_db():
                 sex TEXT,               -- 'male' / 'female' / 'unknown' или NULL
                 weight_kg REAL,
                 breed TEXT,
+                is_main INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """
         )
+        _ensure_column(cur, "pets", "is_main", "INTEGER NOT NULL DEFAULT 0")
         # Подписки
         cur.execute(
             """
@@ -408,12 +420,15 @@ def create_pet(owner_id: int, pet_type: str, pet_name: str | None) -> int:
     now = _utc_now_iso()
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM pets WHERE owner_id = ?", (owner_id,))
+        count = int((cur.fetchone() or [0])[0] or 0)
+        is_main = 1 if count == 0 else 0
         cur.execute(
             """
-            INSERT INTO pets (owner_id, pet_type, pet_name, added_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO pets (owner_id, pet_type, pet_name, added_at, is_main)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (owner_id, pet_type, pet_name, now),
+            (owner_id, pet_type, pet_name, now, is_main),
         )
 
         # Обратная связь (feedback пользователей)
@@ -455,10 +470,11 @@ def get_pets_for_user(owner_id: int):
                     birth_precision,
                     sex,
                     weight_kg,
-                    breed
+                    breed,
+                    is_main
                 FROM pets
                 WHERE owner_id = ?
-                ORDER BY id
+                ORDER BY is_main DESC, id
                 """,
                 (owner_id,),
             )
@@ -481,6 +497,7 @@ def get_pets_for_user(owner_id: int):
                 "sex": r[8],
                 "weight_kg": r[9],
                 "breed": r[10],
+                "is_main": r[11],
             }
         )
     return pets
@@ -508,7 +525,8 @@ def get_pet_by_id(pet_id: int):
                 birth_precision,
                 sex,
                 weight_kg,
-                breed
+                breed,
+                is_main
             FROM pets
             WHERE id = ?
             """,
@@ -530,7 +548,46 @@ def get_pet_by_id(pet_id: int):
         "sex": row[9],
         "weight_kg": row[10],
         "breed": row[11],
+        "is_main": row[12],
     }
+
+
+def get_main_pet_id(owner_id: int) -> int | None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id
+            FROM pets
+            WHERE owner_id = ? AND is_main = 1
+            ORDER BY id
+            LIMIT 1
+            """,
+            (owner_id,),
+        )
+        row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
+def set_main_pet(owner_id: int, pet_id: int) -> bool:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM pets WHERE owner_id = ? AND id = ?", (owner_id, pet_id))
+        if cur.fetchone() is None:
+            return False
+
+        cur.execute("UPDATE pets SET is_main = 0 WHERE owner_id = ?", (owner_id,))
+        cur.execute("UPDATE pets SET is_main = 1 WHERE owner_id = ? AND id = ?", (owner_id, pet_id))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def clear_main_pet(owner_id: int) -> bool:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE pets SET is_main = 0 WHERE owner_id = ?", (owner_id,))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def delete_pet(owner_id: int, pet_id: int) -> bool:
@@ -547,6 +604,23 @@ def delete_pet(owner_id: int, pet_id: int) -> bool:
             "DELETE FROM pets WHERE id = ? AND owner_id = ?",
             (pet_id, owner_id),
         )
+        deleted = cur.rowcount > 0
+        if deleted:
+            cur.execute(
+                "SELECT id FROM pets WHERE owner_id = ? AND is_main = 1 ORDER BY id LIMIT 1",
+                (owner_id,),
+            )
+        if deleted and cur.fetchone() is None:
+            cur.execute(
+                """
+                UPDATE pets
+                SET is_main = 1
+                WHERE id = (
+                    SELECT id FROM pets WHERE owner_id = ? ORDER BY id LIMIT 1
+                )
+                """,
+                (owner_id,),
+            )
 
         # Обратная связь (feedback пользователей)
         cur.execute(
@@ -563,7 +637,7 @@ def delete_pet(owner_id: int, pet_id: int) -> bool:
             """
         )
         conn.commit()
-        return cur.rowcount > 0
+        return deleted
 
 
 def update_pet_name(owner_id: int, pet_id: int, new_name: str | None) -> bool:

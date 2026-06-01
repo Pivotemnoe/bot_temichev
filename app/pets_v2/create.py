@@ -15,7 +15,7 @@ from app.db import (
     get_pets_for_user,
     ensure_default_subscription,
 )
-from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
+from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb, onb_step3_kb
 from app.constants import SUPPORTED_PETS
 from app.pets_v2.card import show_pet_card
 
@@ -158,6 +158,7 @@ async def create_pet_v2_choose_name(message: Message, state: FSMContext):
     # Сразу открываем карточку нового питомца (v2)
     try:
         await show_pet_card(message, int(pet_id))
+        await message.answer("Следующий шаг — можно разобрать жалобу и сохранить результат в историю.", reply_markup=onb_step3_kb())
     except Exception:
         # fallback — в главное меню
         await message.answer("Открываю главное меню.", reply_markup=main_menu_kb())

@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 
 from app.start_texts import START_WELCOME, START_NEED_REGISTER, START_RETURNING_USER
+from app.handlers.onboarding import maybe_show_onboarding_after_start, show_step3
 
 from app.db import (
     get_user_by_telegram_id,
@@ -186,6 +187,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 reply_markup=main_menu_kb(),
             )
         await state.clear()
+        await maybe_show_onboarding_after_start(message, state, user)
         return
 
     # Новый пользователь: приветствие и онбординг
@@ -366,3 +368,4 @@ async def reg_pet_name(message: Message, state: FSMContext):
     )
 
     await state.clear()
+    await show_step3(message)

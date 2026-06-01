@@ -4,6 +4,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 
 from app.constants import SUBSCRIPTION_BUTTONS, EXTRA_REQUEST_PRICE_RUB
 
+PLUS_PAY_BUTTON = "💳 Оплатить Plus — 200 ₽"
+PLUS_BACK_BUTTON = "⬅️ Назад к подписке"
+
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
     """
@@ -37,6 +40,7 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
         ],
         # Поиск клиники — отдельно
         [
+            KeyboardButton(text="🚀 Быстрый старт"),
             KeyboardButton(text="🏥 Найти клинику"),
         ],
         # Инфо о боте и обратная связь — одной строкой
@@ -193,3 +197,53 @@ def subscription_cta_inline_kb(show_back: bool = True) -> InlineKeyboardMarkup:
     if show_back:
         rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def plus_paywall_inline_kb(back_callback_data: str = "open:main_menu") -> InlineKeyboardMarkup:
+    """Unified Plus CTA keyboard for paywall screens."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ Перейти на Plus", callback_data="open:subscription")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"paywall_back:{back_callback_data}")],
+        ]
+    )
+
+
+def onb_step1_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить питомца", callback_data="onb:add_pet")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+        ]
+    )
+
+
+def onb_step2_kb(pets: list[dict]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for pet in pets:
+        pet_id = pet.get("id")
+        if pet_id is None:
+            continue
+        pet_type = pet.get("pet_type") or "питомец"
+        pet_name = pet.get("pet_name") or "(без имени)"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"⭐ {pet_type} — {pet_name}",
+                    callback_data=f"onb:set_main:{pet_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="Пропустить", callback_data="onb:skip_main")])
+    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def onb_step3_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🩺 Разобрать жалобу", callback_data="onb:start_triage")],
+            [InlineKeyboardButton(text="Готово", callback_data="onb:done")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+        ]
+    )
