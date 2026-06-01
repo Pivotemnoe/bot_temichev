@@ -23,6 +23,7 @@ REQUIRED_TABLES = {
     "users",
     "pets",
     "subscriptions",
+    "payments",
     "triage_logs",
     "triage_followups",
     "reminders",

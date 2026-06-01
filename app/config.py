@@ -83,6 +83,17 @@ FAQ_MODEL = os.getenv("FAQ_MODEL", "gpt-4o-mini")
 CARE_MODEL = os.getenv("CARE_MODEL", "gpt-4o-mini")
 
 # -----------------------------
+# ОПЛАТА (ЮKassa)
+# -----------------------------
+
+YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "")
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "")
+YOOKASSA_RETURN_URL = os.getenv("YOOKASSA_RETURN_URL", "https://t.me/")
+YOOKASSA_RECEIPT_EMAIL = os.getenv("YOOKASSA_RECEIPT_EMAIL", "")
+YOOKASSA_TAX_SYSTEM_CODE = os.getenv("YOOKASSA_TAX_SYSTEM_CODE", "")
+YOOKASSA_VAT_CODE = os.getenv("YOOKASSA_VAT_CODE", "1")
+
+# -----------------------------
 # ОПЦИИ ЛОГИРОВАНИЯ
 # -----------------------------
 

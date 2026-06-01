@@ -9,14 +9,25 @@ from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
-from app.keyboards import main_menu_kb, subscription_kb
+from app.keyboards import (
+    main_menu_kb,
+    payment_created_kb,
+    plus_checkout_kb,
+    pro_vip_back_kb,
+    subscription_kb,
+)
+from app.payments.yookassa import YooKassaConfigError, create_plus_payment, get_payment
 from app.db import (
+    activate_plus,
+    create_payment_record,
+    get_last_payment,
     log_user_event,
 
     get_user_by_telegram_id,
     ensure_default_subscription,
     set_subscription_plan,
     get_subscription,
+    update_payment_status,
 )
 from app.texts import INVALID_INPUT_TEXT
 from app.system_texts import MAIN_MENU_TITLE
@@ -26,11 +37,31 @@ from app.keyboards_reminders import reminders_menu_kb
 from app.keyboards_knowledge import faq_menu_kb
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
 from app.services.static_assets import send_static_photo
-from app.services.analytics import EVENT_PAY_CLICKED, track_event
+from app.services.analytics import EVENT_PAYMENT_SUCCESS, EVENT_PAY_CLICKED, track_event
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+PLUS_PLAN_DESCRIPTION = """🔹 <b>Plus — 200 ₽ / месяц</b>
+
+<b>Что входит:</b>
+• до <b>10 запросов по здоровью</b> в месяц;
+• усиленный разбор жалоб;
+• расширенная история по питомцам;
+• до <b>20 активных напоминаний</b>;
+• до <b>3 питомцев</b>.
+
+Нажмите кнопку ниже, чтобы перейти к оплате."""
+
+PRO_PLAN_DESCRIPTION = """🔺 <b>Pro — в разработке</b>
+
+Этот тариф пока недоступен для подключения. Сейчас безопасно подключаем только Plus."""
+
+VIP_PLAN_DESCRIPTION = """👑 <b>VIP — в разработке</b>
+
+Этот тариф пока недоступен для подключения. Сейчас безопасно подключаем только Plus."""
 
 
 # Тексты кнопок главного меню (и алиасы), которые НЕ должны перехватываться меню-фоллбеком.
@@ -78,6 +109,8 @@ MAIN_MENU_BUTTONS = (
     "➕ Добавить животное",
     "🚀 Быстрый старт",
     "🎯 Как пользоваться",
+    "📋 Все тарифы",
+    "✅ Я оплатил (проверить)",
 )
 
 
@@ -117,7 +150,13 @@ async def menu_faq(message: Message):
 # ================= Моя подписка =================
 
 
-async def _send_subscription_screen(message: Message, state: FSMContext, telegram_id: int | None = None) -> None:
+async def _send_subscription_screen(
+    message: Message,
+    state: FSMContext,
+    telegram_id: int | None = None,
+    *,
+    force: bool = False,
+) -> None:
     tg_id = telegram_id or message.from_user.id
     user = get_user_by_telegram_id(tg_id)
     if user is None:
@@ -133,7 +172,7 @@ async def _send_subscription_screen(message: Message, state: FSMContext, telegra
     data = await state.get_data()
     last_hash = data.get("subscription_last_hash")
     cur_hash = hash(text)
-    if last_hash == cur_hash and data.get("last_screen") == "subscription":
+    if not force and last_hash == cur_hash and data.get("last_screen") == "subscription":
         return
     await state.update_data(last_screen="subscription", subscription_last_hash=cur_hash)
 
@@ -153,7 +192,7 @@ async def callback_open_subscription(callback: CallbackQuery, state: FSMContext)
     if callback.message is None:
         await callback.answer()
         return
-    await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id)
+    await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id, force=True)
     await callback.answer()
 
 
@@ -175,7 +214,7 @@ async def callback_paywall_back(callback: CallbackQuery, state: FSMContext):
 
     target = (callback.data or "").split(":", 1)[1]
     if target == "open:subscription":
-        await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id)
+        await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id, force=True)
     else:
         await state.clear()
         await callback.message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
@@ -232,8 +271,17 @@ async def change_subscription_plan(message: Message):
         )
         return
 
-    if plan_code != "free":
-        track_event(user["id"], EVENT_PAY_CLICKED, {"plan_code": plan_code, "reason": "subscription"})
+    if plan_code == "plus":
+        await message.answer(PLUS_PLAN_DESCRIPTION, reply_markup=plus_checkout_kb())
+        return
+
+    if plan_code == "pro":
+        await message.answer(PRO_PLAN_DESCRIPTION, reply_markup=pro_vip_back_kb())
+        return
+
+    if plan_code == "vip":
+        await message.answer(VIP_PLAN_DESCRIPTION, reply_markup=pro_vip_back_kb())
+        return
 
     set_subscription_plan(user["id"], plan_code)
     sub = get_subscription(user["id"])
@@ -241,6 +289,154 @@ async def change_subscription_plan(message: Message):
     text = build_subscription_text(sub)
 
     await message.answer(text, reply_markup=subscription_kb())
+
+
+@router.callback_query(F.data == "sub:back")
+async def callback_subscription_back(callback: CallbackQuery, state: FSMContext):
+    if callback.message is None:
+        await callback.answer()
+        return
+    await _send_subscription_screen(callback.message, state, telegram_id=callback.from_user.id, force=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "pay:plus")
+async def callback_pay_plus(callback: CallbackQuery):
+    if callback.message is None:
+        await callback.answer()
+        return
+
+    user = get_user_by_telegram_id(callback.from_user.id)
+    if user is None:
+        await callback.message.answer("Вы ещё не зарегистрированы. Сначала используйте /start.", reply_markup=main_menu_kb())
+        await callback.answer()
+        return
+
+    track_event(user["id"], EVENT_PAY_CLICKED, {"plan_code": "plus", "reason": "subscription"})
+
+    try:
+        payment = await create_plus_payment(user_id=int(user["id"]), telegram_id=int(callback.from_user.id))
+    except YooKassaConfigError as e:
+        await callback.message.answer(
+            f"Оплата пока не настроена: {e}.",
+            reply_markup=plus_checkout_kb(),
+        )
+        await callback.answer()
+        return
+    except Exception:
+        logger.exception("Failed to create YooKassa payment")
+        await callback.message.answer(
+            "Не удалось создать платёж. Попробуйте позже.",
+            reply_markup=plus_checkout_kb(),
+        )
+        await callback.answer()
+        return
+
+    payment_id = payment.get("id")
+    confirmation = payment.get("confirmation") or {}
+    pay_url = confirmation.get("confirmation_url")
+
+    if payment_id:
+        create_payment_record(
+            user_id=int(user["id"]),
+            provider="yookassa",
+            provider_payment_id=str(payment_id),
+            plan_code="plus",
+            amount_rub=200,
+            status=payment.get("status") or "pending",
+            raw_payload=payment,
+        )
+
+    if not pay_url:
+        await callback.message.answer("Платёж создан, но ссылка на оплату не получена. Попробуйте ещё раз.", reply_markup=plus_checkout_kb())
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        "Платёж создан. Откройте оплату, затем вернитесь в бот и нажмите «Я оплатил».",
+        reply_markup=payment_created_kb(str(pay_url)),
+    )
+    await callback.answer()
+
+
+@router.message(F.text == "📋 Все тарифы")
+async def show_all_tariffs(message: Message):
+    await message.answer(
+        "Тарифы:\n\n"
+        "🆓 Free — базовый доступ.\n"
+        "🔹 Plus — 200 ₽/мес, расширенные лимиты и история.\n"
+        "🔺 Pro — в разработке.\n"
+        "👑 VIP — в разработке.",
+        reply_markup=subscription_kb(),
+    )
+
+
+async def _check_last_payment(message: Message, telegram_id: int) -> None:
+    user = get_user_by_telegram_id(telegram_id)
+    if user is None:
+        await message.answer("Вы ещё не зарегистрированы. Сначала используйте /start.", reply_markup=main_menu_kb())
+        return
+
+    last = get_last_payment(int(user["id"]), provider="yookassa")
+    if not last:
+        await message.answer("Я не нашёл созданный платёж. Откройте Plus и создайте оплату.", reply_markup=subscription_kb())
+        return
+
+    payment_id = str(last["provider_payment_id"])
+    try:
+        payment = await get_payment(payment_id)
+    except YooKassaConfigError as e:
+        await message.answer(f"Оплата пока не настроена: {e}.", reply_markup=subscription_kb())
+        return
+    except Exception:
+        logger.exception("Failed to check YooKassa payment")
+        await message.answer("Не удалось проверить оплату. Попробуйте позже.", reply_markup=subscription_kb())
+        return
+
+    status = (payment.get("status") or "").lower()
+    was_succeeded = (last.get("status") or "").lower() == "succeeded"
+
+    if status == "succeeded":
+        paid_at = payment.get("captured_at") or payment.get("created_at")
+        update_payment_status("yookassa", payment_id, "succeeded", paid_at=paid_at, raw_payload=payment)
+        activate_plus(int(user["id"]))
+        if not was_succeeded:
+            track_event(
+                int(user["id"]),
+                EVENT_PAYMENT_SUCCESS,
+                {
+                    "plan_code": "plus",
+                    "amount_rub": int(last.get("amount_rub") or 200),
+                    "provider": "yookassa",
+                    "provider_payment_id": payment_id,
+                },
+            )
+        sub = get_subscription(int(user["id"]))
+        await message.answer("Оплата подтверждена. Подписка Plus активирована.", reply_markup=subscription_kb())
+        await message.answer(build_subscription_text(sub), reply_markup=subscription_kb())
+        return
+
+    if status in {"pending", "waiting_for_capture"}:
+        update_payment_status("yookassa", payment_id, status, raw_payload=payment)
+        await message.answer("Платёж ещё не завершён. Если вы только что оплатили, попробуйте проверить через минуту.", reply_markup=subscription_kb())
+        return
+
+    update_payment_status("yookassa", payment_id, status or "unknown", raw_payload=payment)
+    await message.answer(f"Статус платежа: {status or 'unknown'}. Если оплата не прошла, создайте новый платёж.", reply_markup=subscription_kb())
+
+
+@router.message(F.text == "✅ Я оплатил (проверить)")
+async def check_payment(message: Message):
+    await _check_last_payment(message, message.from_user.id)
+
+
+@router.callback_query(F.data == "pay:check")
+async def callback_check_payment(callback: CallbackQuery):
+    if callback.message is None:
+        await callback.answer()
+        return
+    await _check_last_payment(callback.message, callback.from_user.id)
+    await callback.answer()
 
 
 # ================= Фоллбек — только для НЕ-команд =================

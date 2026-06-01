@@ -82,11 +82,12 @@ Implemented in current working copy:
 - Follow-up tables/service/runner/handlers.
 - Standardized E_SUITE `user_events` analytics and `/admin` dashboard.
 - Prompt selector with Base / Plus Expert / Clinic / Clinic Postop modes.
+- YooKassa Plus payment creation/check flow with env-only secrets and `payment_success` analytics.
 
 Not implemented or incomplete:
 
 - Full clinic CRM/dashboard beyond the lightweight clinic surface.
-- Payment flow is absent in current working copy.
+- Live YooKassa charge was not executed from the local audit environment.
 
 ## High-Priority Bugs/Risks Found
 
@@ -257,6 +258,37 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 8 Payments
+
+- Used the reference archive only as a guide for the YooKassa redirect-payment flow.
+- Checked current YooKassa docs before coding:
+  - `https://yookassa.ru/developers/payment-acceptance/getting-started/quick-start`
+  - `https://yookassa.ru/developers/using-api/interaction-format`
+- Added env-only payment config:
+  - `YOOKASSA_SHOP_ID`
+  - `YOOKASSA_SECRET_KEY`
+  - `YOOKASSA_RETURN_URL`
+  - optional receipt fields: `YOOKASSA_RECEIPT_EMAIL`, `YOOKASSA_TAX_SYSTEM_CODE`, `YOOKASSA_VAT_CODE`
+- Added isolated payment client in `app/payments/yookassa.py`.
+- Added `payments` table, indexes, payment-record helpers, and `activate_plus()`.
+- Changed paid tariff selection so Plus opens a real payment link instead of activating immediately.
+- Added manual "Я оплатил" status check through YooKassa API.
+- Added `payment_success` analytics event after first successful confirmation.
+- Kept Pro/VIP as unavailable instead of silently activating paid plans.
+- Added `tools/check_phase8.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase8.py`
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python tools/check_phase4.py`
+  - `.venv/bin/python tools/check_phase5.py`
+  - `.venv/bin/python tools/check_phase6.py`
+  - `.venv/bin/python tools/check_phase7.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- No live charge was created locally; the code path is ready for Telegram/YooKassa sandbox or test-bot verification after env setup.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -334,10 +366,10 @@ Not implemented or incomplete:
 
 ### Phase 8 — Payments
 
-1. Decide whether YooKassa from reference zip is the target provider.
-2. Add payment config safely with env-only secrets.
-3. Implement pay click, payment creation/status handling, and `payment_success`.
-4. Keep payment code isolated and test with mocked calls before live network.
+1. Done: use YooKassa from the reference zip as the target provider.
+2. Done: add payment config safely with env-only secrets.
+3. Done: implement pay click, payment creation/status handling, and `payment_success`.
+4. Done: keep payment code isolated and test without live charges before Telegram/YooKassa verification.
 
 ## Files to Ignore for Immediate Implementation
 

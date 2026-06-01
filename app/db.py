@@ -86,6 +86,25 @@ def init_db():
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                provider_payment_id TEXT NOT NULL,
+                plan_code TEXT NOT NULL,
+                amount_rub INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                paid_at TEXT,
+                raw_payload TEXT,
+                UNIQUE(provider, provider_payment_id),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
         # Логи триажа
         cur.execute(
             """
@@ -279,6 +298,12 @@ def init_db():
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_subscription_offer_logs_event_shown ON subscription_offer_logs(event_type, shown_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_user_created ON payments(user_id, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_provider_status ON payments(provider, status)"
         )
 
         conn.commit()
@@ -975,6 +1000,152 @@ def set_subscription_plan(user_id: int, plan_code: str):
             """
         )
         conn.commit()
+
+
+def activate_plus(user_id: int) -> None:
+    set_subscription_plan(user_id, "plus")
+
+
+def _payment_row_to_dict(row) -> dict:
+    raw_payload = row[10] if len(row) > 10 else None
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except Exception:
+        payload = {}
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "provider": row[2],
+        "provider_payment_id": row[3],
+        "plan_code": row[4],
+        "amount_rub": row[5],
+        "status": row[6],
+        "created_at": row[7],
+        "updated_at": row[8],
+        "paid_at": row[9],
+        "raw_payload": payload,
+    }
+
+
+def create_payment_record(
+    *,
+    user_id: int,
+    provider: str,
+    provider_payment_id: str,
+    amount_rub: int,
+    status: str,
+    plan_code: str = "plus",
+    raw_payload: dict | None = None,
+) -> int:
+    now = _utc_now_iso()
+    payload_json = json.dumps(raw_payload or {}, ensure_ascii=False)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO payments (
+                user_id, provider, provider_payment_id, plan_code, amount_rub,
+                status, created_at, updated_at, paid_at, raw_payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(provider, provider_payment_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                plan_code = excluded.plan_code,
+                amount_rub = excluded.amount_rub,
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                raw_payload = excluded.raw_payload
+            """,
+            (
+                int(user_id),
+                provider,
+                provider_payment_id,
+                plan_code,
+                int(amount_rub),
+                status,
+                now,
+                now,
+                payload_json,
+            ),
+        )
+        conn.commit()
+        if cur.lastrowid:
+            return int(cur.lastrowid)
+
+        cur.execute(
+            "SELECT id FROM payments WHERE provider = ? AND provider_payment_id = ?",
+            (provider, provider_payment_id),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+def update_payment_status(
+    provider: str,
+    provider_payment_id: str,
+    status: str,
+    *,
+    paid_at: str | None = None,
+    raw_payload: dict | None = None,
+) -> bool:
+    now = _utc_now_iso()
+    payload_json = json.dumps(raw_payload or {}, ensure_ascii=False) if raw_payload is not None else None
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        if payload_json is None:
+            cur.execute(
+                """
+                UPDATE payments
+                SET status = ?, paid_at = COALESCE(?, paid_at), updated_at = ?
+                WHERE provider = ? AND provider_payment_id = ?
+                """,
+                (status, paid_at, now, provider, provider_payment_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE payments
+                SET status = ?, paid_at = COALESCE(?, paid_at), updated_at = ?, raw_payload = ?
+                WHERE provider = ? AND provider_payment_id = ?
+                """,
+                (status, paid_at, now, payload_json, provider, provider_payment_id),
+            )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_payment_record(provider: str, provider_payment_id: str) -> dict | None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, user_id, provider, provider_payment_id, plan_code, amount_rub,
+                   status, created_at, updated_at, paid_at, raw_payload
+            FROM payments
+            WHERE provider = ? AND provider_payment_id = ?
+            """,
+            (provider, provider_payment_id),
+        )
+        row = cur.fetchone()
+    return _payment_row_to_dict(row) if row else None
+
+
+def get_last_payment(user_id: int, provider: str = "yookassa") -> dict | None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, user_id, provider, provider_payment_id, plan_code, amount_rub,
+                   status, created_at, updated_at, paid_at, raw_payload
+            FROM payments
+            WHERE user_id = ? AND provider = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(user_id), provider),
+        )
+        row = cur.fetchone()
+    return _payment_row_to_dict(row) if row else None
 
 
 def try_consume_quota(user_id: int, amount: int = 1):

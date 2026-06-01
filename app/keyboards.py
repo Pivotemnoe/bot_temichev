@@ -93,11 +93,18 @@ def skip_kb() -> ReplyKeyboardMarkup:
 
 def subscription_kb() -> ReplyKeyboardMarkup:
     """
-    Клавиатура выбора тарифа + покупка доп. запроса + отписка.
+    Клавиатура подписки:
+      - тарифы;
+      - проверка оплаты;
+      - доп. запрос;
+      - отписка.
     """
     plan_buttons = [
         [KeyboardButton(text=text)] for text in SUBSCRIPTION_BUTTONS.keys()
     ]
+
+    plan_buttons.append([KeyboardButton(text="📋 Все тарифы")])
+    plan_buttons.append([KeyboardButton(text="✅ Я оплатил (проверить)")])
 
     extra_and_unsubscribe = [
         KeyboardButton(
@@ -205,6 +212,33 @@ def plus_paywall_inline_kb(back_callback_data: str = "open:main_menu") -> Inline
         inline_keyboard=[
             [InlineKeyboardButton(text="⭐ Перейти на Plus", callback_data="open:subscription")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"paywall_back:{back_callback_data}")],
+        ]
+    )
+
+
+def plus_checkout_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить Plus — 200 ₽", callback_data="pay:plus")],
+            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
+        ]
+    )
+
+
+def payment_created_kb(pay_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Открыть оплату", url=pay_url)],
+            [InlineKeyboardButton(text="✅ Я оплатил (проверить)", callback_data="pay:check")],
+            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
+        ]
+    )
+
+
+def pro_vip_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
         ]
     )
 
