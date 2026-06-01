@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 PLANS: Dict[str, Dict[str, Any]] = {
-    "free": {"history_limit": 10, "analytics_enabled": False},
+    "free": {"history_limit": 3, "analytics_enabled": False},
     "plus": {"history_limit": 100, "analytics_enabled": True},
     "pro": {"history_limit": None, "analytics_enabled": True},
 }

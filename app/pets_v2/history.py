@@ -17,9 +17,10 @@ from app.db import (
     get_pet_history,
     count_pet_history,
 )
-from app.keyboards import main_menu_kb, subscription_cta_inline_kb
+from app.keyboards import main_menu_kb
 from app.services.subscription_resolver import maybe_show_subscription_offer, get_offer_text
 from app.services.subscription_limits import can_access_history
+from app.services.paywall import send_plus_paywall_explained
 
 router = Router(name="pets_v2_history")
 
@@ -145,9 +146,9 @@ async def _show_history(message: Message, user_id: int, pet_id: int, offset: int
             ctx={"pet_id": pet_id, "total": total, "filter": flt, "exceeds_free_limit": True},
         )
         text = get_offer_text("HISTORY_OPENED", decision, {"total": total}) or (
-            "🔒 Полная история здоровья доступна по подписке."
+            "Полная история разборов доступна в Plus. В Free показываем последние 3 разбора."
         )
-        await message.answer(text, reply_markup=subscription_cta_inline_kb())
+        await send_plus_paywall_explained(message, reason_text=text)
         return
 
     events = get_pet_history(pet_id=pet_id, limit=PAGE_SIZE, offset=offset, event_types=event_types)

@@ -133,6 +133,26 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 3 B2/C UX and Trust
+
+- Added the last 3 triage summaries to the pet card overview.
+- Changed Free full-history access limit to 3 records.
+- Added post-triage inline actions:
+  - open the selected pet card
+  - start another triage
+  - return to menu
+- Ensured triage responses include the standard trust phrase when the LLM omits it.
+- Normalized short triage summaries to one compact line.
+- Reused unified Plus paywall for full-history gating and exhausted triage quota.
+- Added `tools/check_phase3.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -163,11 +183,11 @@ Not implemented or incomplete:
 
 ### Phase 3 — B2 and C Completion
 
-1. Add last 3 triage entries into pet overview.
-2. Add "full history" gating according to final product rules.
-3. Add post-triage buttons: open pet card and start another triage.
-4. Standardize paywall copy and trust wording.
-5. Ensure free/plus/pro limits match the chosen matrix.
+1. Done: add last 3 triage entries into pet overview.
+2. Done: add "full history" gating according to final product rules.
+3. Done: add post-triage buttons: open pet card and start another triage.
+4. Done: standardize paywall copy and trust wording.
+5. Done: ensure free/plus/pro history limits match the chosen B2 rule.
 
 ### Phase 4 — Follow-up D/D2 + MD1
 

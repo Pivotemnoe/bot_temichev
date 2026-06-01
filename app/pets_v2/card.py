@@ -84,6 +84,7 @@ from app.db import (
     set_main_pet,
     clear_main_pet,
     get_user_pets,
+    get_pet_history,
     list_pet_history,
     get_pet_observations,
     get_user_reminders,
@@ -299,11 +300,12 @@ def _pet_card_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb.button(text="⏰ Напоминания", callback_data=_cb("reminders", pet_id))
     kb.button(text="📊 Наблюдения", callback_data=_cb("observations", pet_id))
     kb.button(text="⚖️ Вес", callback_data=_cb("stats", pet_id))
-    kb.button(text="📜 История", callback_data=_cb("history", pet_id))
+    kb.button(text="📜 Вся история", callback_data=f"petcard:history:{pet_id}:0:triage")
+    kb.button(text="🩺 Разобрать жалобу", callback_data="onb:start_triage")
     kb.button(text="✏️ Изменить", callback_data=_cb("edit", pet_id))
     kb.button(text="🗑 Удалить", callback_data=_cb("delete", pet_id))
     kb.button(text="⬅️ В меню", callback_data=_cb("back_menu", pet_id))
-    kb.adjust(2, 2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -321,6 +323,46 @@ def _confirm_delete_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb.button(text="❌ Отмена", callback_data=_cb("overview", pet_id))
     kb.adjust(2)
     return kb.as_markup()
+
+
+def _short_dt(value: str | None) -> str:
+    if not value:
+        return "—"
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%d.%m")
+    except Exception:
+        return str(value)[:5] or "—"
+
+
+def _one_line(value: str | None, limit: int = 140) -> str:
+    text = " ".join(str(value or "").split())
+    text = re.sub(r"^\d+\)\s*", "", text)
+    text = re.sub(r"^Кратко\s*:\s*", "", text, flags=re.IGNORECASE).strip()
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _triage_history_preview_lines(pet_id: int) -> list[str]:
+    events = get_pet_history(pet_id=pet_id, limit=3, event_types=["triage"]) if pet_id else []
+    if not events:
+        return [
+            "📜 История разборов: пока пусто",
+            "Вы можете начать с разбора жалобы.",
+        ]
+
+    lines = [
+        "📜 История разборов (последние 3):",
+        "Здесь сохраняются разборы состояния питомца, чтобы вы могли видеть динамику и не терять важные детали.",
+    ]
+    for event in events:
+        meta = event.get("metadata") or {}
+        emoji = (meta.get("urgency_emoji") or "").strip()
+        summary = _one_line(meta.get("summary") or event.get("details") or event.get("title") or "Разбор жалобы")
+        prefix = f"{emoji} " if emoji else ""
+        lines.append(f"• {_short_dt(event.get('created_at'))} — {prefix}{summary}".strip())
+    return lines
+
 
 def _build_overview_text(pet: dict, owner_id: int) -> str:
     pet = _normalize_pet(pet)
@@ -406,6 +448,8 @@ def _build_overview_text(pet: dict, owner_id: int) -> str:
         f"• 💉 Вакцинации: {v_count}",
         f"• ⏰ Напоминания: {r_count}",
         f"• 📊 Наблюдения: {o_count}",
+        "",
+        *_triage_history_preview_lines(pet_id),
         "",
         "Выберите раздел ниже 👇",
     ]

@@ -21,7 +21,7 @@ from app.db import (
     get_triage_history_for_user,
     add_pet_history_event,
 )
-from app.keyboards import main_menu_kb, choose_pet_kb, age_group_kb, duration_kb, subscription_kb
+from app.keyboards import main_menu_kb, choose_pet_kb, age_group_kb, duration_kb, subscription_kb, triage_done_kb
 from app.llm_engine import call_triage_llm
 from app.states import TriageStates
 from app.triage_texts import (
@@ -47,11 +47,14 @@ from app.triage_texts import (
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
 from app.services.pet_observation_service import add_observation
 from app.services.static_assets import send_static_photo
+from app.services.paywall import send_plus_paywall_explained
 
 
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+TRUST_PHRASE = "Этот ответ не заменяет очный осмотр ветеринарного врача"
 
 
 URGENCY_EMOJI_TO_LEVEL = {
@@ -96,6 +99,20 @@ def _urgency_level_from_emoji(emoji: str | None) -> str | None:
     return URGENCY_EMOJI_TO_LEVEL.get(emoji)
 
 
+def _normalize_summary(text: str | None, limit: int = 160) -> str | None:
+    if not text:
+        return None
+    value = " ".join(str(text).split())
+    value = re.sub(r"^\d+\)\s*", "", value)
+    value = re.sub(r"^Кратко\s*:\s*", "", value, flags=re.IGNORECASE)
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) > limit:
+        return value[: limit - 1].rstrip() + "…"
+    return value
+
+
 def _extract_short_summary(response_text: str) -> str | None:
     """Extract a short summary (1-liner) from the LLM response.
 
@@ -106,14 +123,20 @@ def _extract_short_summary(response_text: str) -> str | None:
 
     m = re.search(r"(?:^|\n)\s*(?:\d+\)\s*)?Кратко\s*:\s*([^\n\r]+)", response_text, flags=re.IGNORECASE)
     if m:
-        return m.group(1).strip()
+        return _normalize_summary(m.group(1))
 
     for line in response_text.splitlines():
         line = line.strip()
         if line:
-            line = re.sub(r"^\d+\)\s*", "", line)
-            return line[:180]
+            return _normalize_summary(line)
     return None
+
+
+def _ensure_trust_phrase(response_text: str) -> str:
+    text = (response_text or "").strip()
+    if TRUST_PHRASE.lower() in text.lower():
+        return text
+    return f"{text}\n\n{TRUST_PHRASE}." if text else f"{TRUST_PHRASE}."
 
 
 def _pet_label(pet: Dict) -> str:
@@ -272,7 +295,7 @@ async def triage_get_complaint(message: Message, state: FSMContext):
 
     ok, sub = try_consume_quota(user["id"], amount=1)
     if not ok:
-        await message.answer(TRIAGE_QUOTA_EXHAUSTED, reply_markup=subscription_kb())
+        await send_plus_paywall_explained(message, reason_text=TRIAGE_QUOTA_EXHAUSTED)
         await state.clear()
         return
 
@@ -315,9 +338,10 @@ async def triage_get_complaint(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    response_text = _ensure_trust_phrase(response_text)
     urgency_emoji, urgency_label = _extract_urgency(response_text)
     urgency_level = _urgency_level_from_emoji(urgency_emoji)
-    summary = _extract_short_summary(response_text)
+    summary = _extract_short_summary(response_text) or _normalize_summary(text)
     triage_log_id = None
 
     # Лог в БД + мягкий paywall (если подходит сценарий)
@@ -347,6 +371,11 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     # Поэтому экранируем ответ перед отправкой.
     safe_response_text = html.escape(response_text)
     await message.answer(safe_response_text, reply_markup=main_menu_kb())
+    if pet_id:
+        await message.answer(
+            "Разбор сохранён в историю питомца.",
+            reply_markup=triage_done_kb(int(pet_id)),
+        )
 
     # Записываем событие triage в наблюдения (короткое резюме для ленты)
     if pet_id:

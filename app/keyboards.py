@@ -247,3 +247,13 @@ def onb_step3_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
         ]
     )
+
+
+def triage_done_kb(pet_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🐾 Открыть карточку питомца", callback_data=f"petcard:overview:{pet_id}")],
+            [InlineKeyboardButton(text="🔄 Разобрать другую жалобу", callback_data="onb:start_triage")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+        ]
+    )
