@@ -5,7 +5,7 @@ import logging
 
 from aiogram import Bot
 
-from app.db import get_due_followups, mark_followup_sent
+from app.db import ensure_default_subscription, get_due_followups, get_user_by_id, mark_followup_sent
 from app.services.followup import followup_response_kb, render_followup_text
 from app.services.analytics import EVENT_FOLLOWUP_SENT, track_event
 
@@ -36,6 +36,10 @@ async def _process_single_followup(bot: Bot, item: dict) -> None:
     user_id = item.get("user_id")
     scenario = item.get("scenario") or "basic"
     chat_id = item.get("telegram_id")
+    sub = ensure_default_subscription(int(user_id)) if user_id else {}
+    plan_code = (sub or {}).get("plan_code") or (sub or {}).get("plan") or "free"
+    user = get_user_by_id(int(user_id)) if user_id else {}
+    clinic_id = (user or {}).get("clinic_id")
 
     logger.info(
         "[followups_worker] send_start followup_id=%s triage_event_id=%s user_id=%s scenario=%s",
@@ -52,8 +56,13 @@ async def _process_single_followup(bot: Bot, item: dict) -> None:
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=render_followup_text(scenario),
-            reply_markup=followup_response_kb(followup_id, scenario),
+            text=render_followup_text(scenario, plan_code=plan_code, clinic_id=clinic_id),
+            reply_markup=followup_response_kb(
+                followup_id,
+                scenario,
+                plan_code=plan_code,
+                clinic_id=clinic_id,
+            ),
         )
     except Exception as e:
         logger.exception("[followups_worker] send_failed followup_id=%s error=%r", followup_id, e)

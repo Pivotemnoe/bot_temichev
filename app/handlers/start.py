@@ -21,6 +21,7 @@ from app.db import (
     create_user,
     create_pet,
     get_pets_for_user,
+    set_user_clinic_id_if_empty,
 )
 from app.keyboards import main_menu_kb, pet_type_kb, skip_kb
 from app.states import RegistrationStates
@@ -178,6 +179,8 @@ async def cmd_start(message: Message, state: FSMContext):
 
     # Вариант для уже зарегистрированных пользователей
     if user:
+        if start_payload.get("clinic_id") is not None:
+            set_user_clinic_id_if_empty(user["id"], start_payload.get("clinic_id"))
         track_event(user["id"], EVENT_APP_START, start_payload)
         if from_channel:
             await message.answer(
@@ -350,9 +353,11 @@ async def reg_pet_name(message: Message, state: FSMContext):
     user = get_user_by_telegram_id(tg_id)
     is_new_user = user is None
     if user is None:
-        user_id = create_user(tg_id, name)
+        user_id = create_user(tg_id, name, clinic_id=start_payload.get("clinic_id"))
     else:
         user_id = user["id"]
+        if start_payload.get("clinic_id") is not None:
+            set_user_clinic_id_if_empty(user_id, start_payload.get("clinic_id"))
 
     if is_new_user:
         track_event(user_id, EVENT_APP_START, start_payload)

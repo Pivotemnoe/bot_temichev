@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from urllib.parse import parse_qs
 
-from app.db import ensure_default_subscription, log_user_event
+from app.db import ensure_default_subscription, get_user_by_id, log_user_event
+from app.prompts.selector import select_prompt_mode
 
 
 logger = logging.getLogger(__name__)
@@ -30,10 +31,19 @@ TRIAGE_EVENTS = {
 
 
 def prompt_mode_for_plan(plan_code: str | None) -> str:
-    plan = (plan_code or "free").strip().lower()
-    if plan in {"plus", "pro", "vip"}:
-        return "plus_expert"
-    return "base"
+    return select_prompt_mode(plan_code=plan_code, clinic_id=None)
+
+
+def prompt_mode_for_context(
+    plan_code: str | None,
+    clinic_id: int | None = None,
+    complaint_text: str | None = None,
+) -> str:
+    return select_prompt_mode(
+        plan_code=plan_code,
+        clinic_id=clinic_id,
+        complaint_text=complaint_text,
+    )
 
 
 def parse_start_payload(raw: str | None) -> dict:
@@ -88,10 +98,23 @@ def _standard_payload(user_id: int, event_type: str, payload: dict | None) -> di
         plan_code = result.get("plan_code") or "free"
 
     result.setdefault("plan_code", plan_code)
-    result.setdefault("clinic_id", None)
+    if result.get("clinic_id") is None:
+        try:
+            user = get_user_by_id(int(user_id)) or {}
+            result["clinic_id"] = user.get("clinic_id")
+        except Exception:
+            result.setdefault("clinic_id", None)
+    else:
+        result.setdefault("clinic_id", None)
 
     if event_type in TRIAGE_EVENTS:
-        result.setdefault("prompt_mode", prompt_mode_for_plan(plan_code))
+        result.setdefault(
+            "prompt_mode",
+            prompt_mode_for_context(
+                plan_code,
+                clinic_id=result.get("clinic_id"),
+            ),
+        )
 
     return result
 

@@ -81,10 +81,11 @@ Implemented in current working copy:
 - Unified Plus paywall/trust copy.
 - Follow-up tables/service/runner/handlers.
 - Standardized E_SUITE `user_events` analytics and `/admin` dashboard.
+- Prompt selector with Base / Plus Expert / Clinic / Clinic Postop modes.
 
 Not implemented or incomplete:
 
-- P/PF prompt selector and Plus/Clinic addons.
+- Full clinic/B2B MVP beyond prompt routing.
 - Payment flow is absent in current working copy.
 
 ## High-Priority Bugs/Risks Found
@@ -208,6 +209,31 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched. `payment_success` aggregation is ready, but real payment callback integration remains Phase 8.
 
+### 2026-06-01 — Phase 6 Prompt Selector PF
+
+- Added `app/prompts/` addon files without changing the base `SYSTEM_PROMPT`.
+- Added prompt selector for:
+  - `base`
+  - `plus_expert`
+  - `clinic`
+  - `clinic_postop`
+- Added postop marker detection for clinic-mode.
+- Updated `app/llm_engine.py` to use `final_system_prompt` while keeping the public return value as response text.
+- Added `users.clinic_id` with idempotent migration and first clinic-link persistence.
+- Updated triage analytics to log correct `clinic_id` and `prompt_mode`.
+- Added Plus postop follow-up copy variant.
+- Added `tools/check_phase6.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python tools/check_phase4.py`
+  - `.venv/bin/python tools/check_phase5.py`
+  - `.venv/bin/python tools/check_phase6.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -266,19 +292,21 @@ Not implemented or incomplete:
 
 ### Phase 6 — Prompt Selector PF
 
-1. Add `app/prompts/triage_plus_expert_addon.py`.
-2. Add `app/prompts/triage_clinic_addons.py`.
-3. Refactor LLM call to assemble `final_system_prompt`.
-4. Return or expose `prompt_mode` for logging.
-5. Implement priority: clinic > plus > base.
-6. Keep base `SYSTEM_PROMPT` unchanged.
+1. Done: add `app/prompts/triage_plus_expert_addon.py`.
+2. Done: add `app/prompts/triage_clinic_addons.py`.
+3. Done: refactor LLM call to assemble `final_system_prompt`.
+4. Done: expose `prompt_mode` for logging through selector/analytics.
+5. Done: implement priority: clinic > plus > base.
+6. Done: add clinic postop marker mode.
+7. Done: add Plus postop follow-up text variant.
+8. Done: keep base `SYSTEM_PROMPT` unchanged.
 
 ### Phase 7 — Clinic/B2B MVP
 
-1. Add `clinic_id` storage only after schema plan is agreed.
-2. Parse clinic deep links.
-3. Use clinic PDF copy for clinic onboarding/contact surfaces.
-4. Add clinic-mode prompt behavior and analytics fields.
+1. Done in Phase 6: add `clinic_id` storage.
+2. Done in Phase 5/6: parse clinic deep links.
+3. Pending: use clinic PDF copy for clinic onboarding/contact surfaces.
+4. Done in Phase 6: add clinic-mode prompt behavior and analytics fields.
 5. Defer full CRM/clinic dashboard unless explicitly requested.
 
 ### Phase 8 — Payments

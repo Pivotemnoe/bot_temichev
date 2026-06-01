@@ -17,6 +17,7 @@ from app.db import (
     get_pets_for_user,
     get_pet_by_id,
     try_consume_quota,
+    ensure_default_subscription,
     log_triage_event,
     get_triage_history_for_user,
     add_pet_history_event,
@@ -52,7 +53,7 @@ from app.services.followup import create_followup_for_triage
 from app.services.analytics import (
     EVENT_TRIAGE_COMPLETED,
     EVENT_TRIAGE_STARTED,
-    prompt_mode_for_plan,
+    prompt_mode_for_context,
     track_event,
 )
 
@@ -163,6 +164,18 @@ def _is_cancel(text: str) -> bool:
     return t in {"отменить", "⬅️ в главное меню".lower()}
 
 
+def _triage_start_payload(user: dict, pet_id: int) -> dict:
+    sub = ensure_default_subscription(int(user["id"])) or {}
+    plan_code = sub.get("plan_code") or sub.get("plan") or "free"
+    clinic_id = user.get("clinic_id")
+    return {
+        "pet_id": int(pet_id),
+        "plan_code": plan_code,
+        "clinic_id": clinic_id,
+        "prompt_mode": prompt_mode_for_context(plan_code, clinic_id=clinic_id),
+    }
+
+
 async def start_triage_flow(message: Message, state: FSMContext, telegram_id: int | None = None) -> None:
     """Start triage for a Telegram user, usable from message and callback flows."""
     tg_id = telegram_id or message.from_user.id
@@ -183,7 +196,7 @@ async def start_triage_flow(message: Message, state: FSMContext, telegram_id: in
     if len(pets) == 1:
         pet = pets[0]
         await state.update_data(pet_id=int(pet["id"]))
-        track_event(user["id"], EVENT_TRIAGE_STARTED, {"pet_id": int(pet["id"])})
+        track_event(user["id"], EVENT_TRIAGE_STARTED, _triage_start_payload(user, int(pet["id"])))
         await message.answer(TRIAGE_START_INTRO)
         await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
         await state.set_state(TriageStates.asking_age)
@@ -236,7 +249,7 @@ async def triage_choose_pet(message: Message, state: FSMContext):
     await state.update_data(pet_id=int(pet_id))
     user = get_user_by_telegram_id(message.from_user.id)
     if user:
-        track_event(user["id"], EVENT_TRIAGE_STARTED, {"pet_id": int(pet_id)})
+        track_event(user["id"], EVENT_TRIAGE_STARTED, _triage_start_payload(user, int(pet_id)))
     await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
     await state.set_state(TriageStates.asking_age)
 
@@ -313,6 +326,7 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     quota_before = int(sub.get("quota_used", 0)) - 1
     quota_after = int(sub.get("quota_used", 0))
     plan_code = sub.get("plan_code") or sub.get("plan") or "free"
+    clinic_id = user.get("clinic_id")
 
     data = await state.get_data()
     pet_id = data.get("pet_id")
@@ -334,6 +348,7 @@ async def triage_get_complaint(message: Message, state: FSMContext):
             age_info=age_info,
             duration_info=duration_info,
             plan_code=(sub.get("plan_code") or sub.get("plan") or "free"),
+            clinic_id=clinic_id,
         )
     except (TimeoutError, asyncio.TimeoutError) as e:
         logger.warning("Triage LLM timeout: %s", e)
@@ -379,7 +394,8 @@ async def triage_get_complaint(message: Message, state: FSMContext):
                 "urgency_level": urgency_level or "unknown",
                 "triage_log_id": int(triage_log_id),
                 "plan_code": plan_code,
-                "prompt_mode": prompt_mode_for_plan(plan_code),
+                "clinic_id": clinic_id,
+                "prompt_mode": prompt_mode_for_context(plan_code, clinic_id=clinic_id, complaint_text=text),
             },
         )
 

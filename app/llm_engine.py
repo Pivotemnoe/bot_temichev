@@ -2,6 +2,7 @@ import os
 from typing import List, Dict, Optional
 
 from openai import OpenAI
+from app.prompts.selector import build_final_system_prompt
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -180,6 +181,7 @@ def call_triage_llm(
     age_info: Optional[str] = None,
     duration_info: Optional[str] = None,
     plan_code: Optional[str] = None,
+    clinic_id: Optional[int] = None,
 ) -> str:
     """
     Синхронный вызов LLM для анализа жалобы.
@@ -200,11 +202,17 @@ def call_triage_llm(
         age_info=age_info,
         duration_info=duration_info,
     )
+    final_system_prompt, _prompt_mode = build_final_system_prompt(
+        SYSTEM_PROMPT,
+        plan_code=plan_code,
+        clinic_id=clinic_id,
+        complaint_text=complaint_text,
+    )
 
     req: Dict = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT.strip()},
+            {"role": "system", "content": final_system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }

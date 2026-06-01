@@ -42,10 +42,12 @@ def init_db():
                 registered_at TEXT NOT NULL,
                 tariff TEXT DEFAULT 'free',
                 quota INTEGER DEFAULT 5,
-                is_active INTEGER NOT NULL DEFAULT 1
+                is_active INTEGER NOT NULL DEFAULT 1,
+                clinic_id INTEGER
             )
             """
         )
+        _ensure_column(cur, "users", "clinic_id", "INTEGER")
         # Питомцы
         cur.execute(
             """
@@ -293,7 +295,7 @@ def get_user_by_telegram_id(telegram_id: int):
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, telegram_id, name, registered_at FROM users WHERE telegram_id = ?",
+            "SELECT id, telegram_id, name, registered_at, clinic_id FROM users WHERE telegram_id = ?",
             (telegram_id,),
         )
         row = cur.fetchone()
@@ -304,6 +306,7 @@ def get_user_by_telegram_id(telegram_id: int):
         "telegram_id": row[1],
         "name": row[2],
         "registered_at": row[3],
+        "clinic_id": row[4],
     }
 
 
@@ -408,7 +411,7 @@ def get_user_by_id(user_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, telegram_id, name, registered_at, tariff, quota, is_active
+            SELECT id, telegram_id, name, registered_at, tariff, quota, is_active, clinic_id
             FROM users
             WHERE id = ?
             """,
@@ -425,16 +428,17 @@ def get_user_by_id(user_id: int):
         "tariff": row[4],
         "quota": row[5],
         "is_active": row[6],
+        "clinic_id": row[7],
     }
 
 
-def create_user(telegram_id: int, name: str) -> int:
+def create_user(telegram_id: int, name: str, clinic_id: int | None = None) -> int:
     now = _utc_now_iso()
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO users (telegram_id, name, registered_at) VALUES (?, ?, ?)",
-            (telegram_id, name, now),
+            "INSERT INTO users (telegram_id, name, registered_at, clinic_id) VALUES (?, ?, ?, ?)",
+            (telegram_id, name, now, clinic_id),
         )
 
         # Обратная связь (feedback пользователей)
@@ -453,6 +457,24 @@ def create_user(telegram_id: int, name: str) -> int:
         )
         conn.commit()
         return cur.lastrowid
+
+
+def set_user_clinic_id_if_empty(user_id: int, clinic_id: int | None) -> bool:
+    if clinic_id is None:
+        return False
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE users
+            SET clinic_id = ?
+            WHERE id = ?
+              AND clinic_id IS NULL
+            """,
+            (int(clinic_id), int(user_id)),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ===== Питомцы =====

@@ -40,6 +40,27 @@ POSTOP_ANSWER_TEXTS = {
     "worse": "В послеоперационный период ухудшение состояния — повод для очного осмотра. Рекомендуется обратиться в клинику как можно скорее.",
 }
 
+PLUS_POSTOP_TEXT = (
+    "Вы ранее обращались по состоянию питомца после операции.\n\n"
+    "Подскажите, пожалуйста:\n"
+    "– как сейчас выглядит место операции (сухо ли, есть ли покраснение или отёк)?\n"
+    "– изменились ли аппетит и активность питомца?"
+)
+
+PLUS_POSTOP_ANSWER_TEXTS = {
+    "better": "Это хороший признак.\nВ послеоперационный период продолжайте внимательное наблюдение.",
+    "same": "В послеоперационный период любые изменения требуют внимания.\nЕсли сомнения сохраняются, плановый осмотр у врача будет полезен.",
+    "worse": "Ухудшение состояния после операции — повод для очного осмотра.\nРекомендуется обратиться в клинику как можно скорее.",
+}
+
+
+def _is_plus_postop(plan_code: str | None, clinic_id: int | None, scenario: str | None) -> bool:
+    return (
+        (plan_code or "").strip().lower() == "plus"
+        and clinic_id is None
+        and (scenario or "").strip().lower() == "postop"
+    )
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -137,14 +158,31 @@ def create_followup_for_triage(
     }
 
 
-def render_followup_text(scenario: str | None) -> str:
+def render_followup_text(
+    scenario: str | None,
+    *,
+    plan_code: str | None = None,
+    clinic_id: int | None = None,
+) -> str:
+    if _is_plus_postop(plan_code, clinic_id, scenario):
+        return f"{PLUS_POSTOP_TEXT}\n\n{TRUST_PHRASE}."
+
     key = (scenario or "basic").strip().lower()
     text = SCENARIO_TEXTS.get(key, SCENARIO_TEXTS["basic"])
     return f"{text}\n\n{TRUST_PHRASE}."
 
 
-def followup_response_kb(followup_id: int, scenario: str | None = None) -> InlineKeyboardMarkup:
-    if (scenario or "").strip().lower() == "postop":
+def followup_response_kb(
+    followup_id: int,
+    scenario: str | None = None,
+    *,
+    plan_code: str | None = None,
+    clinic_id: int | None = None,
+) -> InlineKeyboardMarkup:
+    if _is_plus_postop(plan_code, clinic_id, scenario):
+        better = "👍 Всё спокойно"
+        same = "➖ Есть изменения"
+    elif (scenario or "").strip().lower() == "postop":
         better = "👍 Всё спокойно"
         same = "➖ Есть сомнения"
     else:
@@ -165,10 +203,19 @@ def followup_response_kb(followup_id: int, scenario: str | None = None) -> Inlin
     )
 
 
-def render_followup_answer_text(scenario: str | None, answer: str) -> str:
+def render_followup_answer_text(
+    scenario: str | None,
+    answer: str,
+    *,
+    plan_code: str | None = None,
+    clinic_id: int | None = None,
+) -> str:
     if answer == "retry":
         return "Ок, начнём новый разбор."
 
-    source = POSTOP_ANSWER_TEXTS if (scenario or "").strip().lower() == "postop" else ANSWER_TEXTS
+    if _is_plus_postop(plan_code, clinic_id, scenario):
+        source = PLUS_POSTOP_ANSWER_TEXTS
+    else:
+        source = POSTOP_ANSWER_TEXTS if (scenario or "").strip().lower() == "postop" else ANSWER_TEXTS
     text = source.get(answer, ANSWER_TEXTS["same"])
     return f"{text}\n\n{TRUST_PHRASE}."
