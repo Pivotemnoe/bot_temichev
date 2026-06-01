@@ -1,0 +1,184 @@
+# TemichevVet Bot — Working Plan
+
+## Workspace Rules
+
+- Original project is not edited: `/Users/konstantin/Downloads/Temichevvet_bot LLM 2`.
+- Working copy is here: `/Users/konstantin/Documents/темичев вет бот`.
+- Git baseline commit: `5e20381 Baseline working copy`.
+- Runtime/local files are ignored by git: `.env`, `.venv/`, `bot.db`, `errors.log`, `__pycache__/`.
+- Before each implementation block: inspect status, make a small scoped change, run checks, then commit.
+
+## New Materials Reviewed
+
+### Relevant implementation specs
+
+- `TemichevVet_PATCHLIST_PF_Plus_Clinic_PromptSelector_Suite.md`
+  - Supersedes/combines Plus prompt mode and Clinic prompt mode.
+  - Defines prompt selector priority: `clinic > plus > base`.
+  - Requires `app/prompts/`, prompt addons, `prompt_mode` logging.
+
+- `TemichevVet_PATCHLIST_P_v1_1_PlusMode_ProjectAligned.md`
+  - Project-aligned replacement for older P v1.0.
+  - Use `user_events`, `triage_logs`, `prompt_mode`, Plus follow-up variant.
+
+- `TemichevVet_Plus_Expert_Prompt_FINAL.md`
+  - Older/final Plus addon text. Mostly duplicated by P v1.1 and PF.
+  - Keep as source text reference only.
+
+- `TemichevVet_PATCHLIST_F_Prompts_ClinicMode.md`
+  - Clinic addon texts and clinic-mode safety rules.
+  - Mostly duplicated by PF; PF should be used as the master.
+
+- `TemichevVet_PATCHLIST_E_SUITE_v1_1.md`
+  - Supersedes older E/E2/E2.1.
+  - Important change: use existing `user_events` instead of adding `analytics_events`.
+
+- `TemichevVet_MASTER_PATCH_E_E2_E21_AdminDashboard.md`
+  - Older master analytics spec.
+  - Useful background, but E SUITE v1.1 takes precedence where they conflict.
+
+- `TemichevVet_PATCHLIST_E2_Telegram_Admin_Dashboard.md`
+  - Admin dashboard details. Covered by E SUITE v1.1, useful for report copy/layout.
+
+- `TemichevVet_MD1_Autofollowup_Hook.md`
+  - Relevant but assumes follow-up tables/services already exist.
+  - In this working copy they do not exist, so implement base D/D2 first, then MD1 hook.
+
+### Relevant reference archive
+
+- `temichevvet_С рабочий.zip`
+  - Relevant reference, not to be applied wholesale.
+  - Contains later/different versions of onboarding, static banners, paywall service, YooKassa payment client, access middleware, report script, and updated handlers.
+  - Use for selective backport after reviewing diffs.
+
+### Product/clinic PDFs
+
+- `TemichevVet_Clinic_Full_Package.pdf` and `(1).pdf`
+  - Duplicate/near-duplicate clinic offer package.
+  - Relevant for B2B wording and clinic product model, not direct code.
+
+- `TemichevVet_Clinic_Pilot_30_Days.pdf`
+  - Relevant for future clinic pilot onboarding/copy.
+  - Not needed for immediate code stabilization.
+
+- `TemichevVet_Clinic_Offer_RU_Emotional.pdf`
+  - Relevant marketing/copy source for clinic mode.
+  - Not direct implementation spec.
+
+## Current State Summary
+
+Implemented in current working copy:
+
+- Telegram bot wiring with aiogram.
+- User registration.
+- Pets and Pets v2.
+- LLM triage with one base `SYSTEM_PROMPT`.
+- Subscriptions/quotas.
+- Knowledge base with `for_plans`.
+- Reminders.
+- Pet history and observations.
+- Basic `user_events` and subscription offer logs.
+
+Not implemented or incomplete:
+
+- A/A2 onboarding and banners.
+- B2 triage history UX in pet overview and post-triage card button.
+- Unified C paywall/trust layer.
+- D/D2 follow-up tables/service/runner/handlers.
+- E SUITE standardized analytics events and admin dashboard.
+- P/PF prompt selector and Plus/Clinic addons.
+- Payment flow is absent in current working copy.
+
+## High-Priority Bugs/Risks Found
+
+1. `app/pets_v2/create.py`: v2 pet creation normalizes to `cat/dog` but checks against `SUPPORTED_PETS` keys, likely blocking creation.
+2. `app/handlers/triage.py`: urgency parser searches red `🔴`, while prompt requires `🟥`.
+3. `triage_logs.urgency_level` is written as `None`.
+4. `triage_logs` and `pet_history` are not synchronized for older triage records.
+5. Paywall inline callbacks `open:subscription` / `open:main_menu` are referenced but no handlers are present.
+6. `app/db.py` fresh-schema SQL for reminders has `FOREIGN KEY(p_id)` typo.
+7. `app/handlers/observations.py` has an incorrect helper call in `open_observations_for_pet`.
+
+## Work Plan
+
+### Phase 0 — Safety and Baseline
+
+- Keep original project untouched.
+- Commit baseline and this work plan.
+- Use small commits per phase.
+- Do not commit secrets, DB, logs, virtualenv, caches.
+
+### Phase 1 — Stabilize Existing Product
+
+1. Fix Pets v2 creation type validation.
+2. Fix urgency extraction for `🟥` and normalize urgency to `green/yellow/red`.
+3. Store `urgency_level` in `triage_logs`.
+4. Make triage history writes capture `triage_log_id`.
+5. Add missing callback handlers for `open:subscription` and `open:main_menu`.
+6. Fix `observations.py` helper call.
+7. Fix fresh DB schema typo and add idempotent migrations where needed.
+8. Add a small non-network verification script/test for DB helpers and pure logic.
+
+### Phase 2 — Backport Safe Product UX from Reference Zip
+
+1. Review and selectively port static banners.
+2. Port onboarding texts/handlers only after adapting to current handlers.
+3. Port unified paywall service after ensuring callback handlers work.
+4. Avoid wholesale copying zip files because its schema and handlers diverge.
+
+### Phase 3 — B2 and C Completion
+
+1. Add last 3 triage entries into pet overview.
+2. Add "full history" gating according to final product rules.
+3. Add post-triage buttons: open pet card and start another triage.
+4. Standardize paywall copy and trust wording.
+5. Ensure free/plus/pro limits match the chosen matrix.
+
+### Phase 4 — Follow-up D/D2 + MD1
+
+1. Add `triage_followups` schema and DB helpers.
+2. Add `app/services/followup.py` with scenario detection: general/postop/gitr/trauma.
+3. Add `app/services/followup_runner.py`.
+4. Add `app/handlers/followup.py`.
+5. Add MD1 hook after `triage_completed` for yellow/red only.
+6. Add anti-spam/idempotency.
+7. Verify by using a test DB and shortened schedule.
+
+### Phase 5 — E SUITE Analytics and Admin Dashboard
+
+1. Standardize `user_events` payloads; do not add `analytics_events`.
+2. Add `app_start`, `pet_created`, `triage_started`, `triage_completed`, `paywall_shown`, `pay_clicked`, `payment_success`, `followup_*`.
+3. Add indexes for `user_events` and `triage_logs`.
+4. Add DB aggregation functions.
+5. Add `/admin` dashboard gated by `ADMIN_IDS`.
+6. Add reports: today, 7 days, 30 days, funnel, subscriptions, retention, cost proxy, sources.
+
+### Phase 6 — Prompt Selector PF
+
+1. Add `app/prompts/triage_plus_expert_addon.py`.
+2. Add `app/prompts/triage_clinic_addons.py`.
+3. Refactor LLM call to assemble `final_system_prompt`.
+4. Return or expose `prompt_mode` for logging.
+5. Implement priority: clinic > plus > base.
+6. Keep base `SYSTEM_PROMPT` unchanged.
+
+### Phase 7 — Clinic/B2B MVP
+
+1. Add `clinic_id` storage only after schema plan is agreed.
+2. Parse clinic deep links.
+3. Use clinic PDF copy for clinic onboarding/contact surfaces.
+4. Add clinic-mode prompt behavior and analytics fields.
+5. Defer full CRM/clinic dashboard unless explicitly requested.
+
+### Phase 8 — Payments
+
+1. Decide whether YooKassa from reference zip is the target provider.
+2. Add payment config safely with env-only secrets.
+3. Implement pay click, payment creation/status handling, and `payment_success`.
+4. Keep payment code isolated and test with mocked calls before live network.
+
+## Files to Ignore for Immediate Implementation
+
+- Duplicate older MD specs when superseded by PF or E SUITE v1.1.
+- Clinic PDFs for direct coding; use only for wording/product decisions.
+- `temichevvet_С рабочий.zip` as a deployable artifact; use only as reference.
