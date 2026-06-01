@@ -19,6 +19,7 @@ from app.handlers.pets import router as pets_router
 from app.handlers.observations import router as observations_router
 from app.handlers.followup import router as followup_router
 from app.handlers.admin import router as admin_router
+from app.handlers.clinic import router as clinic_router
 from app.handlers import reminders as reminders_handler
 from app.handlers.knowledge import router as knowledge_router
 from app.pets_v2.router import router as pets_v2_router
@@ -96,6 +97,7 @@ async def main():
     dp.include_router(followup_router)
     dp.include_router(reminders_handler.router)
     dp.include_router(admin_router)
+    dp.include_router(clinic_router)
     dp.include_router(unsubscribe_router)
     dp.include_router(feedback_router)
     dp.include_router(menu_router)

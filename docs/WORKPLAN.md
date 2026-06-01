@@ -85,7 +85,7 @@ Implemented in current working copy:
 
 Not implemented or incomplete:
 
-- Full clinic/B2B MVP beyond prompt routing.
+- Full clinic CRM/dashboard beyond the lightweight clinic surface.
 - Payment flow is absent in current working copy.
 
 ## High-Priority Bugs/Risks Found
@@ -234,6 +234,29 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 7 Clinic/B2B Surface
+
+- Added a lightweight clinic surface without CRM or external calls.
+- Added `app/services/clinic.py`:
+  - reads optional `CLINIC_CONTACTS_JSON`
+  - renders linked clinic copy/contact block
+  - renders safe fallback when no clinic link is attached
+- Added `app/handlers/clinic.py` for `🏥 Найти клинику`.
+- Added clinic start note for users opening the bot through a clinic link.
+- Added inline action from the clinic screen to start triage.
+- Added `tools/check_phase7.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python tools/check_phase4.py`
+  - `.venv/bin/python tools/check_phase5.py`
+  - `.venv/bin/python tools/check_phase6.py`
+  - `.venv/bin/python tools/check_phase7.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -305,7 +328,7 @@ Not implemented or incomplete:
 
 1. Done in Phase 6: add `clinic_id` storage.
 2. Done in Phase 5/6: parse clinic deep links.
-3. Pending: use clinic PDF copy for clinic onboarding/contact surfaces.
+3. Done: use clinic PDF copy for clinic onboarding/contact surfaces.
 4. Done in Phase 6: add clinic-mode prompt behavior and analytics fields.
 5. Defer full CRM/clinic dashboard unless explicitly requested.
 

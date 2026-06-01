@@ -32,6 +32,7 @@ from app.services.analytics import (
     parse_start_payload,
     track_event,
 )
+from app.services.clinic import get_clinic_profile, render_clinic_start_note
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -181,7 +182,9 @@ async def cmd_start(message: Message, state: FSMContext):
     if user:
         if start_payload.get("clinic_id") is not None:
             set_user_clinic_id_if_empty(user["id"], start_payload.get("clinic_id"))
+            user = get_user_by_telegram_id(tg_id) or user
         track_event(user["id"], EVENT_APP_START, start_payload)
+        clinic_profile = get_clinic_profile(user.get("clinic_id")) if user.get("clinic_id") else None
         if from_channel:
             await message.answer(
                 f"Снова привет, {user['name']} 👋\n"
@@ -191,10 +194,15 @@ async def cmd_start(message: Message, state: FSMContext):
                 reply_markup=main_menu_kb(),
             )
         else:
-            await message.answer(
+            returning_text = (
                 f"С возвращением, {user['name']} 👋\n\n"
                 "Я помогу вам разобраться с состоянием питомца, напомню о важных процедурах и сохраню историю его здоровья.\n\n"
-                "Выберите, с чего начнём 👇",
+                "Выберите, с чего начнём 👇"
+            )
+            if clinic_profile and start_payload.get("clinic_id") is not None:
+                returning_text = f"{render_clinic_start_note(clinic_profile)}\n\n{returning_text}"
+            await message.answer(
+                returning_text,
                 reply_markup=main_menu_kb(),
             )
         await state.clear()
@@ -209,6 +217,9 @@ async def cmd_start(message: Message, state: FSMContext):
             "Вы перешли в TemichevVetBot из нашего канала — здесь собрана практическая часть: "
             "не посты, а конкретные шаги, когда с питомцем что-то происходит."
         )
+
+    if start_payload.get("clinic_id") is not None:
+        intro_lines.append(render_clinic_start_note(get_clinic_profile(start_payload.get("clinic_id"))))
 
     intro_lines.append(START_WELCOME)
     intro_lines.append(START_NEED_REGISTER)
