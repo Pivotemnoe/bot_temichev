@@ -81,6 +81,7 @@ Implemented in current working copy:
 - Unified Plus paywall/trust copy.
 - Follow-up tables/service/runner/handlers.
 - Standardized E_SUITE `user_events` analytics and `/admin` dashboard.
+- Aggregated CSV export from `/admin`.
 - Prompt selector with Base / Plus Expert / Clinic / Clinic Postop modes.
 - YooKassa Plus payment creation/check flow with env-only secrets and `payment_success` analytics.
 
@@ -289,6 +290,26 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - No live charge was created locally; the code path is ready for Telegram/YooKassa sandbox or test-bot verification after env setup.
 
+### 2026-06-01 — Phase 9 Admin CSV Export
+
+- Added optional E2 admin CSV export button.
+- Export contains only aggregated metrics:
+  - counts
+  - triage by plan
+  - urgency breakdown
+  - funnel
+  - payments totals
+  - subscription counts
+  - retention
+  - workload/token proxy
+  - UTM/source summaries
+- Export does not include complaint text, names, phones, addresses, or other personal user data.
+- Added CSV assertions to `tools/check_phase5.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase5.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -370,6 +391,12 @@ Not implemented or incomplete:
 2. Done: add payment config safely with env-only secrets.
 3. Done: implement pay click, payment creation/status handling, and `payment_success`.
 4. Done: keep payment code isolated and test without live charges before Telegram/YooKassa verification.
+
+### Phase 9 — Admin CSV Export
+
+1. Done: add optional aggregated CSV export to `/admin`.
+2. Done: keep export free of personal data and complaint text.
+3. Done: cover export with Phase 5 analytics checks.
 
 ## Files to Ignore for Immediate Implementation
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import csv
 import html
+import io
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import ADMIN_IDS
 from app.db import get_admin_dashboard_stats
@@ -35,6 +37,7 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🧾 Расходы", callback_data="admin:costs:7"),
             ],
             [InlineKeyboardButton(text="🔗 Источники", callback_data="admin:sources:30")],
+            [InlineKeyboardButton(text="⬇️ Экспорт CSV", callback_data="admin:export:30")],
         ]
     )
 
@@ -182,6 +185,77 @@ def render_admin_sources_report(label: str, date_from: str, date_to: str) -> str
     return "\n".join(lines)
 
 
+def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    rows: list[list[str | int | float]] = []
+
+    def add(section: str, metric: str, key: str, value: str | int | float) -> None:
+        rows.append([section, metric, key, value])
+
+    add("period", "label", "", label)
+    add("period", "from", "", stats["period"]["from"])
+    add("period", "to", "", stats["period"]["to"])
+
+    counts = stats["counts"]
+    for metric in (
+        "app_start",
+        "triage_started",
+        "triage_completed",
+        "paywall_shown",
+        "pay_clicked",
+        "payment_success",
+        "followup_scheduled",
+        "followup_sent",
+        "followup_answered",
+        "pet_created",
+        "pet_set_main",
+    ):
+        add("counts", metric, "", counts.get(metric, 0))
+
+    for plan, value in sorted((counts.get("triage_by_plan") or {}).items()):
+        add("triage_by_plan", "triage_completed", str(plan), value)
+
+    for urgency, value in stats["urgency"].items():
+        add("urgency", "triage_completed", str(urgency), value)
+
+    for metric, value in stats["funnel"].items():
+        add("funnel", metric, "", value)
+
+    for metric, value in stats["payments"].items():
+        add("payments", metric, "", value)
+
+    for plan, value in stats["subscriptions"].items():
+        add("subscriptions", "active", str(plan), value)
+
+    for metric, value in stats["retention"].items():
+        add("retention", metric, "", value)
+
+    for metric, value in stats["tokens"].items():
+        add("workload", metric, "", value)
+
+    for source_group, sources in stats["sources"].items():
+        for source in sources:
+            source_key = str(source.get("source") or "unknown")
+            add(f"sources_{source_group}", "source_type", source_key, source.get("source_type") or "")
+            add(f"sources_{source_group}", "starts", source_key, source.get("starts", 0))
+            add(f"sources_{source_group}", "triage_completed", source_key, source.get("triage_completed", 0))
+            add(f"sources_{source_group}", "payment_success", source_key, source.get("payment_success", 0))
+            add(f"sources_{source_group}", "amount_rub", source_key, source.get("amount_rub", 0))
+            add(f"sources_{source_group}", "cr_to_pay", source_key, source.get("cr_to_pay", 0))
+
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(["section", "metric", "key", "value"])
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def _admin_export_filename(arg: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_arg = "".join(ch for ch in arg if ch.isalnum()) or "period"
+    return f"temichevvet_admin_{safe_arg}_{stamp}.csv"
+
+
 @router.message(Command("admin"))
 async def admin_menu(message: Message) -> None:
     if not _is_admin(message.from_user.id):
@@ -213,6 +287,15 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         text = render_admin_costs_report(label, date_from, date_to)
     elif report == "sources":
         text = render_admin_sources_report(label, date_from, date_to)
+    elif report == "export":
+        if callback.message:
+            csv_file = BufferedInputFile(
+                render_admin_csv_export(label, date_from, date_to),
+                filename=_admin_export_filename(arg),
+            )
+            await callback.message.answer_document(csv_file, caption=f"CSV экспорт TemichevVet — {label}")
+        await callback.answer()
+        return
     else:
         text = "Неизвестный отчёт."
 
