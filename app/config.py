@@ -20,6 +20,12 @@ if not BOT_TOKEN:
 DB_PATH = os.getenv("DB_PATH", "bot.db")
 
 # -----------------------------
+# СИСТЕМНАЯ ИНФОРМАЦИЯ
+# -----------------------------
+
+ENVIRONMENT = (os.getenv("ENV", "development").strip().lower() or "development")
+
+# -----------------------------
 # ID АДМИНА: для фидбэка, ошибок, техподдержки
 # -----------------------------
 # Может быть:
@@ -56,8 +62,13 @@ def _parse_admin_ids(raw: str, fallback_admin_id: int) -> set[int]:
 
 
 # Telegram ID администраторов, которым доступен /admin dashboard.
-# Если ADMIN_IDS не задан, используем ADMIN_CHAT_ID для обратной совместимости.
-ADMIN_IDS = _parse_admin_ids(os.getenv("ADMIN_IDS", ""), ADMIN_CHAT_ID)
+# В production доступ к админ-панели должен быть задан явно через ADMIN_IDS.
+# ADMIN_CHAT_ID нужен для уведомлений и обратной связи; в production он не должен
+# неявно становиться администратором.
+_admin_ids_raw = os.getenv("ADMIN_IDS", "").strip()
+ADMIN_IDS_EXPLICIT = bool(_admin_ids_raw)
+_admin_fallback = ADMIN_CHAT_ID if not ADMIN_IDS_EXPLICIT and ENVIRONMENT != "production" else 0
+ADMIN_IDS = _parse_admin_ids(_admin_ids_raw, _admin_fallback)
 
 
 # Чат/канал для обратной связи (по умолчанию совпадает с ADMIN_CHAT_ID)
@@ -101,9 +112,3 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Возможность писать ошибки в файл (серверная конфигурация)
 ERROR_LOG_PATH = os.getenv("ERROR_LOG_PATH", "")
-
-# -----------------------------
-# СИСТЕМНАЯ ИНФОРМАЦИЯ
-# -----------------------------
-
-ENVIRONMENT = os.getenv("ENV", "development")  # development / production

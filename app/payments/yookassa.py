@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import base64
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import aiohttp
 
+from app.constants import SUBSCRIPTION_PLANS
 from app.config import (
     YOOKASSA_RECEIPT_EMAIL,
     YOOKASSA_RETURN_URL,
@@ -23,8 +25,16 @@ class YooKassaConfigError(RuntimeError):
     pass
 
 
+class YooKassaPaymentValidationError(RuntimeError):
+    pass
+
+
 def _amount_value(amount_rub: int | float) -> str:
     return f"{float(amount_rub):.2f}"
+
+
+def _plus_price_rub() -> int:
+    return int(SUBSCRIPTION_PLANS["plus"]["price"])
 
 
 def _auth_header() -> str:
@@ -32,6 +42,66 @@ def _auth_header() -> str:
         raise YooKassaConfigError("YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY не заданы")
     token = f"{YOOKASSA_SHOP_ID}:{YOOKASSA_SECRET_KEY}".encode("utf-8")
     return "Basic " + base64.b64encode(token).decode("ascii")
+
+
+def _decimal_amount(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError) as e:
+        raise YooKassaPaymentValidationError("некорректная сумма платежа") from e
+
+
+def _metadata_int(metadata: dict[str, Any], key: str) -> int | None:
+    value = metadata.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as e:
+        raise YooKassaPaymentValidationError(f"некорректный metadata.{key}") from e
+
+
+def validate_plus_payment(
+    payment: dict[str, Any],
+    *,
+    expected_user_id: int,
+    expected_telegram_id: int,
+    expected_amount_rub: int | None = None,
+) -> None:
+    """Проверить, что успешный платёж действительно относится к Plus текущего пользователя."""
+    status = str(payment.get("status") or "").lower()
+    if status != "succeeded":
+        raise YooKassaPaymentValidationError("платёж не в статусе succeeded")
+
+    if payment.get("paid") is not True:
+        raise YooKassaPaymentValidationError("платёж не помечен как paid=true")
+
+    amount = payment.get("amount") or {}
+    if not isinstance(amount, dict):
+        raise YooKassaPaymentValidationError("amount платежа отсутствует")
+
+    if str(amount.get("currency") or "").upper() != "RUB":
+        raise YooKassaPaymentValidationError("валюта платежа не RUB")
+
+    paid_amount = _decimal_amount(amount.get("value"))
+    expected_amount = Decimal(str(expected_amount_rub or _plus_price_rub())).quantize(Decimal("0.01"))
+    if paid_amount != expected_amount:
+        raise YooKassaPaymentValidationError("сумма платежа не совпадает с тарифом Plus")
+
+    metadata = payment.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise YooKassaPaymentValidationError("metadata платежа отсутствует")
+
+    if str(metadata.get("plan_code") or "").lower() != "plus":
+        raise YooKassaPaymentValidationError("metadata.plan_code не plus")
+
+    metadata_user_id = _metadata_int(metadata, "user_id")
+    if metadata_user_id != int(expected_user_id):
+        raise YooKassaPaymentValidationError("metadata.user_id не совпадает с пользователем")
+
+    metadata_telegram_id = _metadata_int(metadata, "telegram_id")
+    if metadata_telegram_id != int(expected_telegram_id):
+        raise YooKassaPaymentValidationError("metadata.telegram_id не совпадает с Telegram ID")
 
 
 def build_receipt(amount_rub: int, description: str) -> dict[str, Any] | None:
@@ -110,7 +180,7 @@ async def create_payment(
 
 async def create_plus_payment(*, user_id: int, telegram_id: int) -> dict[str, Any]:
     return await create_payment(
-        amount_rub=200,
+        amount_rub=_plus_price_rub(),
         description="TemichevVet Plus — подписка на 1 месяц",
         metadata={"telegram_id": int(telegram_id), "user_id": int(user_id), "plan_code": "plus"},
     )

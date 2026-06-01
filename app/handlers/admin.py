@@ -3,21 +3,68 @@ from __future__ import annotations
 import csv
 import html
 import io
+import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from app.config import ADMIN_IDS
+from app.config import ADMIN_CHAT_ID, ADMIN_IDS
 from app.db import get_admin_dashboard_stats
 
 
 router = Router(name="admin")
+logger = logging.getLogger(__name__)
+
+ADMIN_DENIED_TEXT = "Команда не распознана. Откройте меню кнопками ниже."
+_DENIED_ADMIN_NOTIFY_COOLDOWN_SEC = 300
+_denied_admin_notified_at: dict[int, float] = {}
 
 
 def _is_admin(telegram_id: int | None) -> bool:
     return bool(telegram_id and int(telegram_id) in ADMIN_IDS)
+
+
+def _admin_attempt_user_label(user) -> str:
+    if user is None:
+        return "unknown"
+
+    parts = [f"id={getattr(user, 'id', None)}"]
+    username = getattr(user, "username", None)
+    if username:
+        parts.append(f"@{username}")
+
+    full_name = getattr(user, "full_name", None)
+    if full_name:
+        parts.append(str(full_name))
+
+    return " ".join(parts)
+
+
+async def _report_denied_admin_attempt(*, bot, user, source: str) -> None:
+    telegram_id = int(getattr(user, "id", 0) or 0)
+    logger.warning("Denied admin access source=%s user=%s", source, _admin_attempt_user_label(user))
+
+    if not ADMIN_CHAT_ID or not telegram_id:
+        return
+
+    now = time.monotonic()
+    last_notified = _denied_admin_notified_at.get(telegram_id, 0)
+    if now - last_notified < _DENIED_ADMIN_NOTIFY_COOLDOWN_SEC:
+        return
+
+    _denied_admin_notified_at[telegram_id] = now
+    try:
+        await bot.send_message(
+            ADMIN_CHAT_ID,
+            "⚠️ Попытка открыть админ-панель\n"
+            f"Источник: {html.escape(source)}\n"
+            f"Пользователь: {html.escape(_admin_attempt_user_label(user))}",
+        )
+    except Exception:
+        logger.exception("Failed to notify admin about denied admin access")
 
 
 def _admin_menu_kb() -> InlineKeyboardMarkup:
@@ -337,8 +384,10 @@ def _admin_export_filename(arg: str) -> str:
 @router.message(Command("admin"))
 @router.message(F.text.casefold().in_(("админ", "admin")))
 async def admin_menu(message: Message) -> None:
-    if not _is_admin(message.from_user.id):
-        await message.answer("Нет доступа.")
+    telegram_id = message.from_user.id if message.from_user else None
+    if not _is_admin(telegram_id):
+        await _report_denied_admin_attempt(bot=message.bot, user=message.from_user, source="message:admin")
+        await message.answer(ADMIN_DENIED_TEXT)
         return
     await message.answer("<b>Админ-панель TemichevVet</b>", reply_markup=_admin_menu_kb())
 
@@ -346,6 +395,7 @@ async def admin_menu(message: Message) -> None:
 @router.callback_query(F.data.startswith("admin:"))
 async def admin_callbacks(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
+        await _report_denied_admin_attempt(bot=callback.bot, user=callback.from_user, source="callback:admin")
         await callback.answer("Нет доступа.", show_alert=True)
         return
 

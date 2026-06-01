@@ -16,7 +16,13 @@ from app.keyboards import (
     pro_vip_back_kb,
     subscription_kb,
 )
-from app.payments.yookassa import YooKassaConfigError, create_plus_payment, get_payment
+from app.payments.yookassa import (
+    YooKassaConfigError,
+    YooKassaPaymentValidationError,
+    create_plus_payment,
+    get_payment,
+    validate_plus_payment,
+)
 from app.db import (
     activate_plus,
     create_payment_record,
@@ -397,6 +403,28 @@ async def _check_last_payment(message: Message, telegram_id: int) -> None:
     was_succeeded = (last.get("status") or "").lower() == "succeeded"
 
     if status == "succeeded":
+        try:
+            validate_plus_payment(
+                payment,
+                expected_user_id=int(user["id"]),
+                expected_telegram_id=int(telegram_id),
+                expected_amount_rub=int(last.get("amount_rub") or 200),
+            )
+        except YooKassaPaymentValidationError as e:
+            logger.warning(
+                "YooKassa payment validation failed provider_payment_id=%s user_id=%s reason=%s",
+                payment_id,
+                user["id"],
+                e,
+            )
+            update_payment_status("yookassa", payment_id, "validation_failed", raw_payload=payment)
+            await message.answer(
+                "Платёж найден, но не прошёл внутреннюю проверку безопасности. "
+                "Напишите в поддержку, мы проверим оплату вручную.",
+                reply_markup=subscription_kb(),
+            )
+            return
+
         paid_at = payment.get("captured_at") or payment.get("created_at")
         update_payment_status("yookassa", payment_id, "succeeded", paid_at=paid_at, raw_payload=payment)
         activate_plus(int(user["id"]))

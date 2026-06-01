@@ -7,7 +7,16 @@ import os
 import sqlite3
 from contextlib import closing
 
-from app.config import DB_PATH, BOT_TOKEN
+from app.config import (
+    ADMIN_IDS,
+    ADMIN_IDS_EXPLICIT,
+    BOT_TOKEN,
+    DB_PATH,
+    ENVIRONMENT,
+    YOOKASSA_RETURN_URL,
+    YOOKASSA_SECRET_KEY,
+    YOOKASSA_SHOP_ID,
+)
 from app.db import init_db
 
 logger = logging.getLogger(__name__)
@@ -47,6 +56,23 @@ def _check_env() -> None:
 
     if not OPENAI_API_KEY:
         raise SelftestError("OPENAI_API_KEY не указан (см. .env).")
+
+    if ENVIRONMENT == "production":
+        if not ADMIN_IDS_EXPLICIT or not ADMIN_IDS:
+            raise SelftestError(
+                "В production ADMIN_IDS должен быть задан явно. "
+                "ADMIN_CHAT_ID используется для уведомлений, а не как запасной доступ к админке."
+            )
+
+    yookassa_shop_set = bool(YOOKASSA_SHOP_ID)
+    yookassa_secret_set = bool(YOOKASSA_SECRET_KEY)
+    if yookassa_shop_set != yookassa_secret_set:
+        raise SelftestError(
+            "YooKassa настроена неполно: YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY должны быть заданы вместе."
+        )
+
+    if yookassa_shop_set and YOOKASSA_RETURN_URL and not YOOKASSA_RETURN_URL.startswith("https://"):
+        raise SelftestError("YOOKASSA_RETURN_URL должен начинаться с https://.")
 
     logger.info("[SELFTEST] Переменные окружения в порядке.")
 
