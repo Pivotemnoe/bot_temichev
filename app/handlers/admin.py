@@ -33,7 +33,7 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💳 Подписки", callback_data="admin:subscriptions:30"),
             ],
             [
-                InlineKeyboardButton(text="🔁 Retention", callback_data="admin:retention:30"),
+                InlineKeyboardButton(text="🔁 Удержание", callback_data="admin:retention:30"),
                 InlineKeyboardButton(text="🧾 Расходы", callback_data="admin:costs:7"),
             ],
             [InlineKeyboardButton(text="🔗 Источники", callback_data="admin:sources:30")],
@@ -63,6 +63,86 @@ def _fmt_float(value: float) -> str:
     return f"{float(value):.1f}".rstrip("0").rstrip(".")
 
 
+EVENT_LABELS = {
+    "app_start": "Запуски",
+    "triage_started": "Начато разборов",
+    "triage_completed": "Завершено разборов",
+    "paywall_shown": "Показы экрана подписки",
+    "pay_clicked": "Клики оплаты",
+    "payment_success": "Успешные оплаты",
+    "followup_scheduled": "Контрольные вопросы запланированы",
+    "followup_sent": "Контрольные вопросы отправлены",
+    "followup_answered": "Контрольные вопросы с ответом",
+    "pet_created": "Питомцев создано",
+    "pet_set_main": "Основной питомец выбран",
+}
+
+CSV_SECTION_LABELS = {
+    "period": "Период",
+    "counts": "События",
+    "triage_by_plan": "Разборы по тарифам",
+    "urgency": "Срочность",
+    "funnel": "Воронка",
+    "payments": "Платежи",
+    "subscriptions": "Подписки",
+    "retention": "Удержание",
+    "workload": "Нагрузка",
+}
+
+CSV_METRIC_LABELS = {
+    **EVENT_LABELS,
+    "label": "Название периода",
+    "from": "Начало",
+    "to": "Конец",
+    "count": "Количество",
+    "amount_rub": "Сумма, руб.",
+    "active": "Активно",
+    "d1_cohorts": "Вернулись D1",
+    "d7_cohorts": "Вернулись D7",
+    "base_cohorts": "База когорт",
+    "avg_triage_per_user": "Среднее разборов на пользователя",
+    "followup_answered_rate": "Доля ответов на контрольные вопросы",
+    "total_tokens": "Всего токенов",
+    "avg_tokens_per_triage": "Среднее токенов на разбор",
+    "workload_index": "Индекс нагрузки",
+    "source_type": "Тип источника",
+    "starts": "Запуски",
+    "cr_to_pay": "Конверсия в оплату",
+}
+
+URGENCY_LABELS = {
+    "green": "Зелёная",
+    "yellow": "Жёлтая",
+    "red": "Красная",
+    "unknown": "Не определена",
+}
+
+SOURCE_TYPE_LABELS = {
+    "direct": "прямой вход",
+    "utm": "UTM",
+    "clinic_link": "ссылка клиники",
+}
+
+
+def _event_label(key: str) -> str:
+    return EVENT_LABELS.get(key, key)
+
+
+def _csv_section_label(section: str) -> str:
+    if section.startswith("sources_"):
+        return "Источники"
+    return CSV_SECTION_LABELS.get(section, section)
+
+
+def _csv_metric_label(metric: str) -> str:
+    return CSV_METRIC_LABELS.get(metric, metric)
+
+
+def _source_type_label(value: str | None) -> str:
+    raw = str(value or "direct")
+    return SOURCE_TYPE_LABELS.get(raw, raw)
+
+
 def render_admin_period_report(label: str, date_from: str, date_to: str) -> str:
     stats = get_admin_dashboard_stats(date_from, date_to)
     counts = stats["counts"]
@@ -73,31 +153,35 @@ def render_admin_period_report(label: str, date_from: str, date_to: str) -> str:
     lines = [
         f"<b>📊 Отчёт TemichevVet — {html.escape(label)}</b>",
         "",
-        f"Starts: <b>{counts.get('app_start', 0)}</b>",
+        f"Запуски: <b>{counts.get('app_start', 0)}</b>",
         (
-            "Triage: "
+            "Разборы жалоб: "
             f"<b>{counts.get('triage_completed', 0)}</b> "
-            f"(free {triage_by_plan.get('free', 0)}, plus {triage_by_plan.get('plus', 0)}, "
-            f"pro {triage_by_plan.get('pro', 0)}, vip {triage_by_plan.get('vip', 0)})"
+            f"(Free {triage_by_plan.get('free', 0)}, Plus {triage_by_plan.get('plus', 0)}, "
+            f"Pro {triage_by_plan.get('pro', 0)}, VIP {triage_by_plan.get('vip', 0)})"
         ),
         (
-            "Urgency: "
-            f"🟢 {urgency.get('green', 0)} / "
-            f"🟡 {urgency.get('yellow', 0)} / "
-            f"🟥 {urgency.get('red', 0)} / "
-            f"? {urgency.get('unknown', 0)}"
+            "Срочность: "
+            f"🟢 зелёная {urgency.get('green', 0)} / "
+            f"🟡 жёлтая {urgency.get('yellow', 0)} / "
+            f"🟥 красная {urgency.get('red', 0)} / "
+            f"не определена {urgency.get('unknown', 0)}"
         ),
         (
-            "Follow-ups: "
-            f"{counts.get('followup_scheduled', 0)} scheduled / "
-            f"{counts.get('followup_sent', 0)} sent / "
-            f"{counts.get('followup_answered', 0)} answered"
+            "Контрольные вопросы: "
+            f"{counts.get('followup_scheduled', 0)} запланировано / "
+            f"{counts.get('followup_sent', 0)} отправлено / "
+            f"{counts.get('followup_answered', 0)} с ответом"
         ),
-        f"Paywall: {counts.get('paywall_shown', 0)} shown / {counts.get('pay_clicked', 0)} clicked",
-        f"Payments: {payments.get('count', 0)} success / {_fmt_float(payments.get('amount_rub', 0))} ₽",
+        (
+            "Экран подписки: "
+            f"{counts.get('paywall_shown', 0)} показов / "
+            f"{counts.get('pay_clicked', 0)} кликов оплаты"
+        ),
+        f"Оплаты: {payments.get('count', 0)} успешных / {_fmt_float(payments.get('amount_rub', 0))} ₽",
         "",
-        f"paywall→pay: <b>{_pct(counts.get('pay_clicked', 0), counts.get('paywall_shown', 0))}</b>",
-        f"click→pay: <b>{_pct(payments.get('count', 0), counts.get('pay_clicked', 0))}</b>",
+        f"Экран подписки → клик оплаты: <b>{_pct(counts.get('pay_clicked', 0), counts.get('paywall_shown', 0))}</b>",
+        f"Клик оплаты → успешная оплата: <b>{_pct(payments.get('count', 0), counts.get('pay_clicked', 0))}</b>",
     ]
     return "\n".join(lines)
 
@@ -105,17 +189,11 @@ def render_admin_period_report(label: str, date_from: str, date_to: str) -> str:
 def render_admin_funnel_report(label: str, date_from: str, date_to: str) -> str:
     funnel = get_admin_dashboard_stats(date_from, date_to)["funnel"]
     starts = funnel.get("app_start", 0)
-    rows = [
-        ("app_start", "app_start"),
-        ("triage_completed", "triage_completed"),
-        ("paywall_shown", "paywall_shown"),
-        ("pay_clicked", "pay_clicked"),
-        ("payment_success", "payment_success"),
-    ]
+    rows = ["app_start", "triage_completed", "paywall_shown", "pay_clicked", "payment_success"]
     lines = [f"<b>🧪 Воронка — {html.escape(label)}</b>", ""]
-    for key, title in rows:
+    for key in rows:
         value = int(funnel.get(key, 0) or 0)
-        lines.append(f"{title}: <b>{value}</b> ({_pct(value, starts)} от starts)")
+        lines.append(f"{_event_label(key)}: <b>{value}</b> ({_pct(value, starts)} от запусков)")
     return "\n".join(lines)
 
 
@@ -132,9 +210,9 @@ def render_admin_subscriptions_report(label: str, date_from: str, date_to: str) 
         f"Pro: <b>{subs.get('pro', 0)}</b>",
         f"VIP: <b>{subs.get('vip', 0)}</b>",
         "",
-        f"paywall_shown: {counts.get('paywall_shown', 0)}",
-        f"pay_clicked: {counts.get('pay_clicked', 0)}",
-        f"payment_success: {payments.get('count', 0)} / {_fmt_float(payments.get('amount_rub', 0))} ₽",
+        f"Показы экрана подписки: {counts.get('paywall_shown', 0)}",
+        f"Клики оплаты: {counts.get('pay_clicked', 0)}",
+        f"Успешные оплаты: {payments.get('count', 0)} / {_fmt_float(payments.get('amount_rub', 0))} ₽",
     ]
     return "\n".join(lines)
 
@@ -142,13 +220,13 @@ def render_admin_subscriptions_report(label: str, date_from: str, date_to: str) 
 def render_admin_retention_report(label: str, date_from: str, date_to: str) -> str:
     retention = get_admin_dashboard_stats(date_from, date_to)["retention"]
     lines = [
-        f"<b>🔁 Retention — {html.escape(label)}</b>",
+        f"<b>🔁 Удержание — {html.escape(label)}</b>",
         "",
-        f"D1: <b>{_pct(retention.get('d1_cohorts', 0), retention.get('base_cohorts', 0))}</b>",
-        f"D7: <b>{_pct(retention.get('d7_cohorts', 0), retention.get('base_cohorts', 0))}</b>",
-        f"Base cohorts: {retention.get('base_cohorts', 0)}",
-        f"Avg triage/user: {_fmt_float(retention.get('avg_triage_per_user', 0))}",
-        f"Follow-up answered rate: <b>{_pct(retention.get('followup_answered_rate', 0), 1)}</b>",
+        f"Возврат D1: <b>{_pct(retention.get('d1_cohorts', 0), retention.get('base_cohorts', 0))}</b>",
+        f"Возврат D7: <b>{_pct(retention.get('d7_cohorts', 0), retention.get('base_cohorts', 0))}</b>",
+        f"База когорт: {retention.get('base_cohorts', 0)}",
+        f"Среднее разборов на пользователя: {_fmt_float(retention.get('avg_triage_per_user', 0))}",
+        f"Доля ответов на контрольные вопросы: <b>{_pct(retention.get('followup_answered_rate', 0), 1)}</b>",
     ]
     return "\n".join(lines)
 
@@ -158,14 +236,14 @@ def render_admin_costs_report(label: str, date_from: str, date_to: str) -> str:
     counts = stats["counts"]
     tokens = stats["tokens"]
     lines = [
-        f"<b>🧾 Расходы / workload — {html.escape(label)}</b>",
+        f"<b>🧾 Расходы и нагрузка — {html.escape(label)}</b>",
         "",
-        f"triage_completed: <b>{counts.get('triage_completed', 0)}</b>",
-        f"followup_sent: <b>{counts.get('followup_sent', 0)}</b>",
+        f"Завершено разборов: <b>{counts.get('triage_completed', 0)}</b>",
+        f"Контрольных вопросов отправлено: <b>{counts.get('followup_sent', 0)}</b>",
         "",
-        f"total_tokens: <b>{tokens.get('total_tokens', 0)}</b>",
-        f"avg_tokens_per_triage: <b>{_fmt_float(tokens.get('avg_tokens_per_triage', 0))}</b>",
-        f"workload_index: <b>{_fmt_float(tokens.get('workload_index', 0))}</b>",
+        f"Всего токенов: <b>{tokens.get('total_tokens', 0)}</b>",
+        f"Среднее токенов на разбор: <b>{_fmt_float(tokens.get('avg_tokens_per_triage', 0))}</b>",
+        f"Индекс нагрузки: <b>{_fmt_float(tokens.get('workload_index', 0))}</b>",
     ]
     return "\n".join(lines)
 
@@ -176,12 +254,12 @@ def render_admin_sources_report(label: str, date_from: str, date_to: str) -> str
     for source in stats["sources"]["utm_source"]:
         lines.append(
             f"{html.escape(str(source['source']))} "
-            f"({html.escape(str(source['source_type']))}): "
-            f"{source['starts']} starts / {source['triage_completed']} triage / "
-            f"{source['payment_success']} pay / CR {_pct(source['payment_success'], source['starts'])}"
+            f"({html.escape(_source_type_label(source.get('source_type')))}): "
+            f"{source['starts']} запусков / {source['triage_completed']} разборов / "
+            f"{source['payment_success']} оплат / конверсия {_pct(source['payment_success'], source['starts'])}"
         )
     if len(lines) == 2:
-        lines.append("Нет app_start за период.")
+        lines.append("Нет запусков за период.")
     return "\n".join(lines)
 
 
@@ -190,7 +268,7 @@ def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
     rows: list[list[str | int | float]] = []
 
     def add(section: str, metric: str, key: str, value: str | int | float) -> None:
-        rows.append([section, metric, key, value])
+        rows.append([_csv_section_label(section), _csv_metric_label(metric), key, value])
 
     add("period", "label", "", label)
     add("period", "from", "", stats["period"]["from"])
@@ -216,7 +294,7 @@ def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
         add("triage_by_plan", "triage_completed", str(plan), value)
 
     for urgency, value in stats["urgency"].items():
-        add("urgency", "triage_completed", str(urgency), value)
+        add("urgency", "triage_completed", URGENCY_LABELS.get(str(urgency), str(urgency)), value)
 
     for metric, value in stats["funnel"].items():
         add("funnel", metric, "", value)
@@ -236,7 +314,7 @@ def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
     for source_group, sources in stats["sources"].items():
         for source in sources:
             source_key = str(source.get("source") or "unknown")
-            add(f"sources_{source_group}", "source_type", source_key, source.get("source_type") or "")
+            add(f"sources_{source_group}", "source_type", source_key, _source_type_label(source.get("source_type")))
             add(f"sources_{source_group}", "starts", source_key, source.get("starts", 0))
             add(f"sources_{source_group}", "triage_completed", source_key, source.get("triage_completed", 0))
             add(f"sources_{source_group}", "payment_success", source_key, source.get("payment_success", 0))
@@ -245,7 +323,7 @@ def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
 
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer)
-    writer.writerow(["section", "metric", "key", "value"])
+    writer.writerow(["Раздел", "Метрика", "Ключ", "Значение"])
     writer.writerows(rows)
     return buffer.getvalue().encode("utf-8-sig")
 
@@ -257,11 +335,12 @@ def _admin_export_filename(arg: str) -> str:
 
 
 @router.message(Command("admin"))
+@router.message(F.text.casefold().in_(("админ", "admin")))
 async def admin_menu(message: Message) -> None:
     if not _is_admin(message.from_user.id):
         await message.answer("Нет доступа.")
         return
-    await message.answer("<b>Admin dashboard TemichevVet</b>", reply_markup=_admin_menu_kb())
+    await message.answer("<b>Админ-панель TemichevVet</b>", reply_markup=_admin_menu_kb())
 
 
 @router.callback_query(F.data.startswith("admin:"))
