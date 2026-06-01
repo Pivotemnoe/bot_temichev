@@ -234,6 +234,31 @@ def init_db():
             """
         )
 
+        # =================== Follow-ups after triage ===================
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS triage_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                triage_event_id INTEGER NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                pet_id INTEGER,
+                urgency_level TEXT NOT NULL,
+                scenario TEXT NOT NULL DEFAULT 'basic',
+                scheduled_at TEXT NOT NULL,
+                sent_at TEXT,
+                answered_at TEXT,
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                answer TEXT,
+                payload TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(triage_event_id) REFERENCES triage_logs(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(pet_id) REFERENCES pets(id) ON DELETE SET NULL
+            )
+            """
+        )
+
         conn.commit()
 
 
@@ -1054,6 +1079,186 @@ def get_triage_history_for_user(user_id: int, limit: int = 10):
             }
         )
     return history
+
+
+# ===== Follow-ups после triage =====
+
+
+def get_followup_by_triage_event(triage_event_id: int) -> dict | None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, triage_event_id, user_id, pet_id, urgency_level, scenario,
+                   scheduled_at, sent_at, answered_at, status, answer, payload,
+                   created_at, updated_at
+            FROM triage_followups
+            WHERE triage_event_id = ?
+            """,
+            (triage_event_id,),
+        )
+        row = cur.fetchone()
+    return _followup_row_to_dict(row) if row else None
+
+
+def get_followup_by_id(followup_id: int) -> dict | None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, triage_event_id, user_id, pet_id, urgency_level, scenario,
+                   scheduled_at, sent_at, answered_at, status, answer, payload,
+                   created_at, updated_at
+            FROM triage_followups
+            WHERE id = ?
+            """,
+            (followup_id,),
+        )
+        row = cur.fetchone()
+    return _followup_row_to_dict(row) if row else None
+
+
+def has_recent_followup_for_user(user_id: int, since_iso: str) -> bool:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT 1
+            FROM triage_followups
+            WHERE user_id = ?
+              AND created_at >= ?
+              AND status IN ('scheduled', 'sent', 'answered')
+            LIMIT 1
+            """,
+            (user_id, since_iso),
+        )
+        return cur.fetchone() is not None
+
+
+def add_triage_followup(
+    triage_event_id: int,
+    user_id: int,
+    pet_id: int | None,
+    urgency_level: str,
+    scenario: str,
+    scheduled_at: str,
+    payload: dict | None = None,
+) -> int | None:
+    now = _utc_now_iso()
+    payload_json = json.dumps(payload or {}, ensure_ascii=False)
+    try:
+        with closing(sqlite3.connect(DB_PATH)) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO triage_followups (
+                    triage_event_id, user_id, pet_id, urgency_level, scenario,
+                    scheduled_at, status, payload, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)
+                """,
+                (
+                    triage_event_id,
+                    user_id,
+                    pet_id,
+                    urgency_level,
+                    scenario,
+                    scheduled_at,
+                    payload_json,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+    except sqlite3.IntegrityError:
+        return None
+
+
+def get_due_followups(limit: int = 20) -> list[dict]:
+    now = _utc_now_iso()
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                f.id, f.triage_event_id, f.user_id, f.pet_id, f.urgency_level,
+                f.scenario, f.scheduled_at, f.sent_at, f.answered_at, f.status,
+                f.answer, f.payload, f.created_at, f.updated_at,
+                u.telegram_id
+            FROM triage_followups f
+            JOIN users u ON u.id = f.user_id
+            WHERE f.status = 'scheduled'
+              AND f.scheduled_at <= ?
+            ORDER BY f.scheduled_at ASC, f.id ASC
+            LIMIT ?
+            """,
+            (now, limit),
+        )
+        rows = cur.fetchall()
+
+    res: list[dict] = []
+    for row in rows:
+        item = _followup_row_to_dict(row[:14])
+        item["telegram_id"] = row[14]
+        res.append(item)
+    return res
+
+
+def mark_followup_sent(followup_id: int) -> bool:
+    now = _utc_now_iso()
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE triage_followups
+            SET status = 'sent', sent_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'scheduled'
+            """,
+            (now, now, followup_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def mark_followup_answered(followup_id: int, answer: str) -> bool:
+    now = _utc_now_iso()
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE triage_followups
+            SET status = 'answered', answered_at = ?, answer = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, answer, now, followup_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def _followup_row_to_dict(row) -> dict:
+    payload_raw = row[11] if len(row) > 11 else None
+    try:
+        payload = json.loads(payload_raw) if payload_raw else {}
+    except Exception:
+        payload = {}
+    return {
+        "id": row[0],
+        "triage_event_id": row[1],
+        "user_id": row[2],
+        "pet_id": row[3],
+        "urgency_level": row[4],
+        "scenario": row[5],
+        "scheduled_at": row[6],
+        "sent_at": row[7],
+        "answered_at": row[8],
+        "status": row[9],
+        "answer": row[10],
+        "payload": payload,
+        "created_at": row[12],
+        "updated_at": row[13],
+    }
 
 
 # ===== Напоминания и график =====

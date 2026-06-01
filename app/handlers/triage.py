@@ -48,6 +48,7 @@ from app.services.subscription_resolver import maybe_show_subscription_offer, DE
 from app.services.pet_observation_service import add_observation
 from app.services.static_assets import send_static_photo
 from app.services.paywall import send_plus_paywall_explained
+from app.services.followup import create_followup_for_triage
 
 
 
@@ -357,6 +358,25 @@ async def triage_get_complaint(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.warning("Failed to log triage: %s", e)
+
+    try:
+        followup_result = create_followup_for_triage(
+            triage_event_id=triage_log_id,
+            user_id=int(user["id"]),
+            pet_id=int(pet_id) if pet_id else None,
+            urgency_level=urgency_level,
+            complaint_text=text,
+            response_summary=summary,
+        )
+        logger.info(
+            "followup_%s triage_event_id=%s reason=%s scenario=%s",
+            "scheduled" if followup_result.get("created") else "skipped",
+            triage_log_id,
+            followup_result.get("reason"),
+            followup_result.get("scenario"),
+        )
+    except Exception as e:
+        logger.warning("Failed to schedule follow-up: %s", e)
 
     try:
         decision = maybe_show_subscription_offer(

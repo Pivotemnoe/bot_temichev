@@ -24,6 +24,7 @@ REQUIRED_TABLES = {
     "pets",
     "subscriptions",
     "triage_logs",
+    "triage_followups",
     "reminders",
 }
 

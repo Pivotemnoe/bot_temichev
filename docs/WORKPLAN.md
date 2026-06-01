@@ -153,6 +153,29 @@ Not implemented or incomplete:
   - `.venv/bin/python -c "import main; print('main import ok')"`
 - Payment/VPS code was not touched.
 
+### 2026-06-01 — Phase 4 Follow-up D/D2/MD1
+
+- Added `triage_followups` table with idempotency via unique `triage_event_id`.
+- Added follow-up DB helpers: create, due query, sent status, answered status.
+- Added rule-based D2 scenarios:
+  - postop
+  - GI
+  - trauma
+  - basic
+- Added follow-up worker with tick/due/send/sent logs.
+- Added follow-up callback handler for better/same/worse/retry answers.
+- Added automatic MD1 hook after triage for `yellow`/`red`.
+- Added 24-hour anti-spam for follow-up creation.
+- Added `tools/check_phase4.py`.
+- Verification passed:
+  - `.venv/bin/python tools/check_phase1.py`
+  - `.venv/bin/python tools/check_phase2.py`
+  - `.venv/bin/python tools/check_phase3.py`
+  - `.venv/bin/python tools/check_phase4.py`
+  - `.venv/bin/python -m compileall -q app tools main.py`
+  - `.venv/bin/python -c "import main; print('main import ok')"`
+- Payment/VPS code was not touched.
+
 ## Work Plan
 
 ### Phase 0 — Safety and Baseline
@@ -191,13 +214,13 @@ Not implemented or incomplete:
 
 ### Phase 4 — Follow-up D/D2 + MD1
 
-1. Add `triage_followups` schema and DB helpers.
-2. Add `app/services/followup.py` with scenario detection: general/postop/gitr/trauma.
-3. Add `app/services/followup_runner.py`.
-4. Add `app/handlers/followup.py`.
-5. Add MD1 hook after `triage_completed` for yellow/red only.
-6. Add anti-spam/idempotency.
-7. Verify by using a test DB and shortened schedule.
+1. Done: add `triage_followups` schema and DB helpers.
+2. Done: add `app/services/followup.py` with scenario detection: basic/postop/GI/trauma.
+3. Done: add `app/services/followup_runner.py`.
+4. Done: add `app/handlers/followup.py`.
+5. Done: add MD1 hook after `triage_completed` for yellow/red only.
+6. Done: add anti-spam/idempotency.
+7. Done: verify by using a test DB. Telegram delivery smoke can be done later when needed.
 
 ### Phase 5 — E SUITE Analytics and Admin Dashboard
 

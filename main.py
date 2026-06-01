@@ -17,12 +17,14 @@ from app.handlers.menu import router as menu_router
 from app.handlers.triage import router as triage_router
 from app.handlers.pets import router as pets_router
 from app.handlers.observations import router as observations_router
+from app.handlers.followup import router as followup_router
 from app.handlers import reminders as reminders_handler
 from app.handlers.knowledge import router as knowledge_router
 from app.pets_v2.router import router as pets_v2_router
 from app.handlers.feedback import router as feedback_router
 from app.handlers.unsubscribe import router as unsubscribe_router  # ⬅️ ДОБАВЛЕНО
 from app.services.reminders_runner import run_reminders_worker
+from app.services.followup_runner import run_followups_worker
 from app.services.selftest import run_selftest
 
 
@@ -90,6 +92,7 @@ async def main():
     dp.include_router(pets_v2_router)
     dp.include_router(triage_router)
     dp.include_router(observations_router)
+    dp.include_router(followup_router)
     dp.include_router(reminders_handler.router)
     dp.include_router(unsubscribe_router)
     dp.include_router(feedback_router)
@@ -100,6 +103,7 @@ async def main():
     
     # 5. Фоновый воркер напоминаний
     asyncio.create_task(run_reminders_worker(bot))
+    asyncio.create_task(run_followups_worker(bot))
 
     print(
         "TemichevVet Bot v3 — запущен "
