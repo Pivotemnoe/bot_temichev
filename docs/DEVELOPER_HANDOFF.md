@@ -41,6 +41,7 @@ TemichevVet - Telegram-бот для владельцев кошек и соба
 - `app/data/` - JSON-база питания, ухода и FAQ.
 - `app/static/` - изображения и баннеры.
 - `tools/` - локальные проверки.
+- `Dockerfile` и `docker-compose.yml` - запуск через Docker.
 
 ## 4. Как запустить локально
 
@@ -58,6 +59,17 @@ python main.py
 ```
 
 При старте выполняется selftest: проверка env, базы и обязательных таблиц.
+
+## 4.1. Как запустить через Docker
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+В Docker база и логи пишутся в папку `data/`.
+
+Папка `data/` не должна попадать в git.
 
 ## 5. Что нельзя коммитить
 

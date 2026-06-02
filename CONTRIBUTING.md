@@ -56,6 +56,21 @@ misc
 docs/RELEASE_CHECKLIST.md
 ```
 
+## Docker
+
+Для проверки контейнера:
+
+```bash
+docker compose config
+docker compose build
+```
+
+Запуск:
+
+```bash
+docker compose up
+```
+
 ## Где читать контекст
 
 - `README.md`;

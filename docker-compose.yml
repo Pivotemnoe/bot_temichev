@@ -1,0 +1,13 @@
+name: temichevvet
+
+services:
+  temichevvet-bot:
+    build: .
+    container_name: temichevvet-bot
+    restart: unless-stopped
+    environment:
+      DB_PATH: /data/bot.db
+      ERROR_LOG_PATH: /data/errors.log
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/data

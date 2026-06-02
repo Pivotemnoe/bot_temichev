@@ -110,6 +110,24 @@ python main.py
 
 После успешной ручной проверки оформить сервис.
 
+## 6.1. Запуск через Docker
+
+```bash
+cd /opt/temichevvet-new
+cp .env.example .env
+# заполнить .env реальными значениями
+docker compose up --build -d
+docker compose logs -f
+```
+
+В Docker база и логи лежат в:
+
+```text
+/opt/temichevvet-new/data/
+```
+
+Папку `data/` нужно бэкапить перед обновлениями.
+
 ## 7. Systemd пример
 
 ```ini

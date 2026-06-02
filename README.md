@@ -58,6 +58,18 @@ python main.py
 
 При первом запуске будет выполнен self-test и создана база `bot.db` (если её ещё нет).
 
+## Запуск через Docker
+
+1. Создайте `.env` из `.env.example` и заполните реальные значения.
+
+2. Соберите и запустите контейнер:
+
+```bash
+docker compose up --build
+```
+
+В Docker база и логи лежат в локальной папке `data/`, которая не коммитится в git.
+
 ## Документы для разработчика
 
 - [Developer handoff](docs/DEVELOPER_HANDOFF.md) — что это за проект, где что лежит, как проверять изменения.
@@ -111,6 +123,9 @@ python main.py
 - `main.py`;
 - `requirements.txt`;
 - `README.md`;
+- `.env.example`;
+- `Dockerfile`;
+- `docker-compose.yml`;
 - папку `app/` со всем кодом и данными (`app/data/`);
 - папку `docs/` можно оставить для справки, но она не нужна для запуска.
 
