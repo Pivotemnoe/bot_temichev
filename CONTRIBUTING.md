@@ -11,12 +11,7 @@
 ## Обязательные проверки
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m compileall -q app tools main.py
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
-from app.services.selftest import run_selftest
-run_selftest()
-print("selftest ok")
-PY
+make check
 git diff --check
 ```
 
@@ -75,6 +70,10 @@ docker compose up
 
 - `README.md`;
 - `docs/DEVELOPER_HANDOFF.md`;
+- `docs/ARCHITECTURE.md`;
+- `docs/TESTING.md`;
+- `docs/OPERATIONS_RUNBOOK.md`;
+- `docs/GITHUB_WORKFLOW.md`;
 - `docs/DEPLOYMENT_VPS.md`;
 - `docs/SECURITY_PLAN_2026-06-01.md`;
 - `docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md`;

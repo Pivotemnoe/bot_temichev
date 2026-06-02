@@ -73,9 +73,14 @@ docker compose up --build
 ## Документы для разработчика
 
 - [Developer handoff](docs/DEVELOPER_HANDOFF.md) — что это за проект, где что лежит, как проверять изменения.
+- [Architecture](docs/ARCHITECTURE.md) — схема модулей, потоков данных, платежей и админки.
+- [Testing](docs/TESTING.md) — локальные, Docker и Telegram-проверки.
+- [Operations runbook](docs/OPERATIONS_RUNBOOK.md) — запуск, рестарт, бэкап, инциденты, откат.
+- [GitHub workflow](docs/GITHUB_WORKFLOW.md) — ветки, PR, issues, доступы.
 - [VPS deployment](docs/DEPLOYMENT_VPS.md) — безопасный деплой рядом со старой версией.
 - [Release checklist](docs/RELEASE_CHECKLIST.md) — чеклист перед публикацией.
 - [Security plan](docs/SECURITY_PLAN_2026-06-01.md) — защита админки, платежей и секретов.
+- [Security policy](SECURITY.md) — правила по секретам и security-проблемам.
 - [Final report](docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md) — итоговый статус проекта и дальнейший план.
 - [Workplan](docs/WORKPLAN.md) — история выполненных этапов.
 - [Plans matrix](docs/plans_matrix.md) — матрица тарифов и лимитов.

@@ -24,6 +24,10 @@ TemichevVet - Telegram-бот для владельцев кошек и соба
 - `.env.example` - пример переменных окружения без секретов.
 - `docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md` - что уже сделано и проверено.
 - `docs/SECURITY_PLAN_2026-06-01.md` - защита админки и платежей.
+- `docs/ARCHITECTURE.md` - архитектура модулей и потоков.
+- `docs/TESTING.md` - как проверять изменения.
+- `docs/OPERATIONS_RUNBOOK.md` - эксплуатация, бэкапы, откат.
+- `docs/GITHUB_WORKFLOW.md` - правила GitHub-работы.
 - `docs/DEPLOYMENT_VPS.md` - безопасный перенос на VPS.
 - `docs/RELEASE_CHECKLIST.md` - чеклист перед релизом.
 - `docs/WORKPLAN.md` - история этапов разработки.
