@@ -64,7 +64,7 @@ def _get_start_arg(message: Message) -> str:
 
 def _find_logo_path() -> str | None:
     """
-    Найти логотип в STATIC_DIR.
+    Найти приветственный баннер в STATIC_DIR.
     1) Пытаемся по ожидаемым именам.
     2) Если не нашли — берём любой .png/.jpg/.jpeg из каталога.
     """
@@ -73,8 +73,13 @@ def _find_logo_path() -> str | None:
         logger.warning("STATIC_DIR not found: %s", STATIC_DIR)
         return None
 
-    # 1. Ожидаемые имена файлов
+    # 1. Ожидаемые имена файлов. Для первого экрана лучше подходит баннер,
+    # который сразу объясняет основную задачу бота, а не просто логотип.
     candidates = [
+        os.path.join(STATIC_DIR, "welcome_banner.jpg"),
+        os.path.join(STATIC_DIR, "welcome_banner.png"),
+        os.path.join(STATIC_DIR, "triage_banner.jpg"),
+        os.path.join(STATIC_DIR, "triage_banner.png"),
         os.path.join(STATIC_DIR, "logo_temichevvet.png"),
         os.path.join(STATIC_DIR, "logo_temichevvet.jpg"),
         os.path.join(STATIC_DIR, "temichevvet_logo.png"),
@@ -82,7 +87,7 @@ def _find_logo_path() -> str | None:
     ]
     for path in candidates:
         if os.path.exists(path):
-            print(f"[start] Найден логотип по ожидаемому пути: {path}")
+            print(f"[start] Найден приветственный баннер: {path}")
             return path
 
     # 2. Любой картинкой из static
@@ -91,20 +96,20 @@ def _find_logo_path() -> str | None:
         for fname in sorted(os.listdir(STATIC_DIR)):
             if fname.endswith(exts):
                 path = os.path.join(STATIC_DIR, fname)
-                print(f"[start] Найден логотип по авто-поиску: {path}")
+                print(f"[start] Найден приветственный баннер по авто-поиску: {path}")
                 return path
     except Exception as e:
         print(f"[start] Ошибка чтения STATIC_DIR: {e}")
         logger.error("Error listing STATIC_DIR: %s", e)
 
-    print(f"[start] Логотип не найден в каталоге: {STATIC_DIR}")
-    logger.warning("Logo not found in %s", STATIC_DIR)
+    print(f"[start] Приветственный баннер не найден в каталоге: {STATIC_DIR}")
+    logger.warning("Welcome banner not found in %s", STATIC_DIR)
     return None
 
 
 async def _send_logo(message: Message) -> None:
     """
-    Отправить логотип TemichevVet, если файл найден.
+    Отправить приветственный баннер TemichevVet, если файл найден.
     Не ломает дальнейшую работу /start при ошибках.
     """
     logo_path = _find_logo_path()
@@ -114,10 +119,10 @@ async def _send_logo(message: Message) -> None:
     try:
         await message.answer_photo(
             photo=FSInputFile(logo_path),
-            caption="TemichevVetBot — интеллектуальный помощник по здоровью питомца.",
+            caption="TemichevVet помогает быстро оценить срочность ситуации и сохранить историю здоровья питомца.",
         )
-        print(f"[start] Логотип отправлен: {logo_path}")
-        logger.info("Logo sent: %s", logo_path)
+        print(f"[start] Приветственный баннер отправлен: {logo_path}")
+        logger.info("Welcome banner sent: %s", logo_path)
     except Exception as e:
         print(f"[start] Не удалось отправить логотип: {e}")
         logger.error("Failed to send logo: %s", e)
@@ -130,24 +135,24 @@ def _faq_after_start_text() -> str:
     """
     lines: list[str] = []
 
-    lines.append("<b>Частые вопросы</b>\n")
+    lines.append("<b>Как пользоваться ботом</b>\n")
 
     lines.append(
-        "❓ <b>Как пользоваться ботом?</b>\n"
-        "Опишите, что происходит с вашим питомцем, — бот оценит состояние, "
-        "подскажет, насколько ситуация серьёзна, и предложит понятные шаги.\n"
+        "1. Добавьте питомца, чтобы рекомендации были привязаны к его карточке.\n"
+        "2. Если питомцу плохо — нажмите «🩺 Разобрать жалобу» и опишите симптомы обычными словами.\n"
+        "3. После ответа сохраните событие в историю и следите за динамикой через наблюдения.\n"
     )
 
     lines.append(
-        "❓ <b>Что такое лимиты запросов?</b>\n"
-        "В тарифе есть определённое количество обращений за интеллектуальной оценкой "
-        "состояния. Остальные разделы (питание, уход, знания) работают без ограничений.\n"
+        "<b>Когда нужно срочно к врачу</b>\n"
+        "Если есть тяжёлое дыхание, судороги, сильное кровотечение, потеря сознания, "
+        "подозрение на отравление или резкое ухудшение — не ждите ответа бота, обращайтесь в клинику.\n"
     )
 
     lines.append(
-        "❓ <b>Зачем добавлять питомца?</b>\n"
-        "Чтобы рекомендации учитывали вид, возраст и историю состояний именно вашего "
-        "питомца, а не были «в среднем по больнице».\n"
+        "<b>Что можно делать без регистрации</b>\n"
+        "Можно посмотреть питание, уход и ответы на частые вопросы. Для разборов, истории "
+        "и напоминаний лучше добавить питомца."
     )
 
     return "\n".join(lines)
@@ -196,8 +201,12 @@ async def cmd_start(message: Message, state: FSMContext):
         else:
             returning_text = (
                 f"С возвращением, {user['name']} 👋\n\n"
-                "Я помогу вам разобраться с состоянием питомца, напомню о важных процедурах и сохраню историю его здоровья.\n\n"
-                "Выберите, с чего начнём 👇"
+                "Что нужно сделать сейчас?\n\n"
+                "• 🩺 Разобрать жалобу — если питомцу плохо.\n"
+                "• 🐾 Мои животные — открыть карточку и историю.\n"
+                "• ⏰ Напоминания — процедуры, обработки, осмотры.\n"
+                "• 🍽️ Питание — проверить продукт или блюдо.\n\n"
+                "Выберите раздел ниже."
             )
             if clinic_profile and start_payload.get("clinic_id") is not None:
                 returning_text = f"{render_clinic_start_note(clinic_profile)}\n\n{returning_text}"
@@ -224,8 +233,8 @@ async def cmd_start(message: Message, state: FSMContext):
     intro_lines.append(START_WELCOME)
     intro_lines.append(START_NEED_REGISTER)
     intro_lines.append(
-        "Для старта нажмите «👤 Зарегистрироваться и добавить питомца» — это займёт пару минут.\n"
-        "Если хотите сначала посмотреть разделы, выберите «📋 Открыть главное меню»."
+        "Нажмите «👤 Зарегистрироваться и добавить питомца», чтобы бот сразу работал точнее.\n"
+        "Или выберите «📋 Открыть главное меню», если хотите сначала осмотреть разделы."
     )
 
     text = "\n\n".join(intro_lines)
@@ -264,8 +273,9 @@ async def open_main_menu_from_start(message: Message, state: FSMContext):
     """Открыть главное меню без немедленной регистрации."""
     await state.clear()
     await message.answer(
-        "Главное меню. Вы можете изучить разделы. "
-        "Для точных рекомендаций по здоровью потребуется регистрация и добавление питомца.",
+        "Главное меню открыто.\n\n"
+        "Можно посмотреть питание, уход и ответы на вопросы. "
+        "Для разборов состояния, истории и напоминаний добавьте питомца.",
         reply_markup=main_menu_kb(),
     )
 
