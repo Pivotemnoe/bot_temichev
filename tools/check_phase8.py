@@ -37,12 +37,14 @@ from app.db import (  # noqa: E402
     list_payment_records,
     payment_records_summary,
     set_subscription_plan,
+    try_consume_quota,
     update_payment_status,
 )
 from app.keyboards import payment_created_kb, plus_checkout_kb, subscription_inline_kb, subscription_kb  # noqa: E402
 from app.handlers.menu import (  # noqa: E402
     EXTRA_REQUEST_BUTTON,
     EXTRA_REQUEST_IN_DEVELOPMENT_TEXT,
+    _handle_subscription_plan_code,
     buy_extra_request,
     callback_buy_extra_request,
 )
@@ -112,6 +114,40 @@ async def check_extra_request_stub() -> None:
     assert callback.message.answers
     assert callback.message.answers[0][0] == EXTRA_REQUEST_IN_DEVELOPMENT_TEXT
     assert callback.answers == [("Функция в разработке", None)]
+
+
+async def check_current_plan_click_does_not_reset_quota() -> None:
+    init_db()
+    telegram_id = 880188
+    user_id = create_user(telegram_id=telegram_id, name="Phase8 Current Free")
+    ok, _sub = try_consume_quota(user_id, amount=1)
+    assert ok
+    assert get_subscription(user_id)["quota_used"] == 1
+
+    message = _FakeMessage()
+    await _handle_subscription_plan_code(message, telegram_id, "free")
+
+    sub = get_subscription(user_id)
+    assert sub["plan"] == "free"
+    assert sub["quota_used"] == 1
+    assert message.answers
+    assert "не менялись" in message.answers[0][0]
+    assert "Использовано запросов: <b>1</b> / <b>5</b>" in message.answers[0][0]
+
+
+async def check_free_button_does_not_downgrade_paid_plan() -> None:
+    init_db()
+    telegram_id = 880189
+    user_id = create_user(telegram_id=telegram_id, name="Phase8 Paid")
+    activate_plus(user_id)
+    assert get_subscription(user_id)["plan"] == "plus"
+
+    message = _FakeMessage()
+    await _handle_subscription_plan_code(message, telegram_id, "free")
+
+    assert get_subscription(user_id)["plan"] == "plus"
+    assert message.answers
+    assert "Отписаться" in message.answers[0][0]
 
 
 def check_yookassa_payload() -> None:
@@ -220,6 +256,8 @@ async def check_payment_reconcile_flow() -> None:
 def main() -> None:
     check_keyboards()
     asyncio.run(check_extra_request_stub())
+    asyncio.run(check_current_plan_click_does_not_reset_quota())
+    asyncio.run(check_free_button_does_not_downgrade_paid_plan())
     check_yookassa_payload()
     check_payment_db_flow()
     asyncio.run(check_payment_reconcile_flow())

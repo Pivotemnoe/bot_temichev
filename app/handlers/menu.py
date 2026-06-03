@@ -32,7 +32,6 @@ from app.db import (
 
     get_user_by_telegram_id,
     ensure_default_subscription,
-    set_subscription_plan,
     get_subscription,
     update_payment_status,
 )
@@ -287,6 +286,32 @@ async def _handle_subscription_plan_code(message: Message, telegram_id: int, pla
         )
         return
 
+    if plan_code not in SUBSCRIPTION_PLANS:
+        await message.answer(
+            "Не удалось определить тариф. Попробуйте выбрать ещё раз.",
+            reply_markup=subscription_kb(),
+        )
+        return
+
+    sub = ensure_default_subscription(int(user["id"])) or {}
+    current_plan = (sub.get("plan") or "free").lower()
+    if current_plan == plan_code:
+        await message.answer(
+            "Этот тариф уже активен. Лимит и использованные запросы не менялись.\n\n"
+            f"{build_subscription_text(sub)}",
+            reply_markup=subscription_kb(),
+        )
+        return
+
+    if plan_code == "free" and current_plan != "free":
+        await message.answer(
+            "Переход на Free отключит текущий платный доступ.\n\n"
+            "Чтобы сделать это безопасно, используйте кнопку «🚪 Отписаться и удалить доступ» "
+            "и подтвердите действие.",
+            reply_markup=subscription_kb(),
+        )
+        return
+
     if plan_code == "plus":
         await message.answer(PLUS_PLAN_DESCRIPTION, reply_markup=plus_checkout_kb())
         return
@@ -298,17 +323,6 @@ async def _handle_subscription_plan_code(message: Message, telegram_id: int, pla
     if plan_code == "vip":
         await message.answer(VIP_PLAN_DESCRIPTION, reply_markup=pro_vip_back_kb())
         return
-
-    if plan_code != "free":
-        await message.answer(
-            "Не удалось определить тариф. Попробуйте выбрать ещё раз.",
-            reply_markup=subscription_kb(),
-        )
-        return
-
-    set_subscription_plan(user["id"], plan_code)
-    sub = get_subscription(user["id"])
-    await message.answer(build_subscription_text(sub), reply_markup=subscription_kb())
 
 
 @router.message(F.text.in_(list(SUBSCRIPTION_BUTTONS.keys())))
