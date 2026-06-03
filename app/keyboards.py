@@ -18,34 +18,31 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
       - добавлены кнопки «ℹ️ О боте» и «✉️ Обратная связь».
     """
     keyboard = [
-        # Здоровье и история — вместе
         [
             KeyboardButton(text="🩺 Разобрать жалобу"),
             KeyboardButton(text="📜 История здоровья"),
         ],
         [
             KeyboardButton(text="📊 Наблюдения"),
+            KeyboardButton(text="🐾 Мои животные"),
         ],
-        # Питание, уход и FAQ — одной строкой
         [
             KeyboardButton(text="🍽️ Питание"),
             KeyboardButton(text="🧴 Уход и привычки"),
+        ],
+        [
             KeyboardButton(text="❓ Вопросы и ответы"),
-        ],
-        # Напоминания, мои животные и подписка — одной строкой
-        [
             KeyboardButton(text="⏰ Напоминания"),
-            KeyboardButton(text="🐾 Мои животные"),
+        ],
+        [
             KeyboardButton(text="👤 Моя подписка"),
-        ],
-        # Поиск клиники — отдельно
-        [
             KeyboardButton(text="🚀 Быстрый старт"),
-            KeyboardButton(text="🏥 Найти клинику"),
         ],
-        # Инфо о боте и обратная связь — одной строкой
         [
+            KeyboardButton(text="🏥 Найти клинику"),
             KeyboardButton(text="ℹ️ О боте"),
+        ],
+        [
             KeyboardButton(text="✉️ Обратная связь"),
         ],
     ]

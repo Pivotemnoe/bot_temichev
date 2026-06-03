@@ -22,6 +22,7 @@ from app.onboarding_texts import (
 )
 from app.pets_v2.create import start_create_pet_v2
 from app.services.static_assets import send_static_photo
+from app.texts import NEXT_STEPS_TEXT
 
 
 logger = logging.getLogger(__name__)
@@ -139,4 +140,7 @@ async def onb_start_triage(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "onb:done")
 async def onb_done(callback: CallbackQuery) -> None:
     await callback.answer()
-    await callback.message.answer(f"<b>{DONE_TITLE}</b>\n\n{DONE_BODY}", reply_markup=main_menu_kb())
+    await callback.message.answer(
+        f"<b>{DONE_TITLE}</b>\n\n{DONE_BODY}\n\n{NEXT_STEPS_TEXT}",
+        reply_markup=main_menu_kb(),
+    )

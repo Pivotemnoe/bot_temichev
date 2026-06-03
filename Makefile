@@ -1,8 +1,8 @@
-.PHONY: check compile selftest knowledge-check security-check phase-check docker-config docker-build docker-selftest status
+.PHONY: check compile selftest knowledge-check security-check phase-check mobile-ux-check mobile-preview docker-config docker-build docker-selftest status
 
 PYTHON ?= .venv/bin/python
 
-check: compile selftest knowledge-check security-check phase-check
+check: compile selftest knowledge-check security-check phase-check mobile-ux-check
 
 compile:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m compileall -q app tools main.py
@@ -25,6 +25,12 @@ phase-check:
 	$(PYTHON) tools/check_phase6.py
 	$(PYTHON) tools/check_phase7.py
 	$(PYTHON) tools/check_phase8.py
+
+mobile-ux-check:
+	$(PYTHON) tools/check_mobile_ux.py --quiet
+
+mobile-preview:
+	$(PYTHON) tools/check_mobile_ux.py
 
 docker-config:
 	docker compose config

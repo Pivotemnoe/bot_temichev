@@ -14,7 +14,7 @@ from aiogram.types import (
 )
 
 from app.start_texts import START_WELCOME, START_NEED_REGISTER, START_RETURNING_USER
-from app.texts import MAIN_MENU_GUIDE_TEXT
+from app.texts import MAIN_MENU_QUICK_GUIDE_TEXT, NEXT_STEPS_TEXT
 from app.handlers.onboarding import maybe_show_onboarding_after_start, show_step3
 
 from app.db import (
@@ -47,8 +47,8 @@ def _welcome_kb() -> ReplyKeyboardMarkup:
     """Клавиатура первого экрана: регистрация или сразу в меню."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="👤 Зарегистрироваться и добавить питомца")],
-            [KeyboardButton(text="📋 Открыть главное меню")],
+            [KeyboardButton(text="👤 Зарегистрироваться")],
+            [KeyboardButton(text="📋 Главное меню")],
         ],
         resize_keyboard=True,
     )
@@ -156,7 +156,7 @@ def _faq_after_start_text() -> str:
         "и напоминаний лучше добавить питомца."
     )
 
-    lines.append(MAIN_MENU_GUIDE_TEXT)
+    lines.append(MAIN_MENU_QUICK_GUIDE_TEXT)
 
     return "\n".join(lines)
 
@@ -249,7 +249,7 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer(_faq_after_start_text())
 
 
-@router.message(F.text == "👤 Зарегистрироваться и добавить питомца")
+@router.message(F.text.in_({"👤 Зарегистрироваться", "👤 Зарегистрироваться и добавить питомца"}))
 async def start_registration(message: Message, state: FSMContext):
     _state = None
     try:
@@ -265,7 +265,7 @@ async def start_registration(message: Message, state: FSMContext):
     await state.set_state(RegistrationStates.waiting_for_name)
 
 
-@router.message(F.text.in_({"📋 Открыть главное меню", "🏠 Меню", "🏠 Главное меню"}))
+@router.message(F.text.in_({"📋 Главное меню", "📋 Открыть главное меню", "🏠 Меню", "🏠 Главное меню"}))
 async def open_main_menu_from_start(message: Message, state: FSMContext):
     _state = None
     try:
@@ -278,7 +278,8 @@ async def open_main_menu_from_start(message: Message, state: FSMContext):
     await message.answer(
         "Главное меню открыто.\n\n"
         "Можно посмотреть питание, уход и ответы на вопросы. "
-        "Для разборов состояния, истории и напоминаний добавьте питомца.",
+        "Для разборов состояния, истории и напоминаний добавьте питомца.\n\n"
+        f"{NEXT_STEPS_TEXT}",
         reply_markup=main_menu_kb(),
     )
 
