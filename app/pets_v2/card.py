@@ -81,6 +81,7 @@ from app.keyboards import main_menu_kb, onb_step3_kb
 from app.db import (
     get_user_by_telegram_id,
     get_pet_by_id,
+    get_pet_for_user,
     set_main_pet,
     clear_main_pet,
     get_user_pets,
@@ -501,7 +502,7 @@ async def show_pet_card(message: Message, pet_id: int) -> None:
         )
         return
 
-    pet = _normalize_pet(get_pet_by_id(pet_id))
+    pet = _normalize_pet(get_pet_for_user(int(user["id"]), pet_id))
     if not pet or int(pet.get("id") or 0) != int(pet_id):
         await message.answer("Питомец не найден.", reply_markup=main_menu_kb())
         return
@@ -543,7 +544,7 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
         await _safe_callback_answer(callback, "Нажмите /start", show_alert=True)
         return
 
-    pet = _normalize_pet(get_pet_by_id(pet_id))
+    pet = _normalize_pet(get_pet_for_user(int(user["id"]), pet_id))
     if not pet:
         await _safe_callback_answer(callback, "Питомец не найден", show_alert=True)
         return
@@ -551,7 +552,7 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
     if action == "set_main":
         if set_main_pet(user["id"], pet_id):
             track_event(user["id"], EVENT_PET_SET_MAIN, {"pet_id": int(pet_id)})
-            updated_pet = _normalize_pet(get_pet_by_id(pet_id))
+            updated_pet = _normalize_pet(get_pet_for_user(int(user["id"]), pet_id))
             text = _build_overview_text(updated_pet, owner_id=user["id"])
             await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))
             await callback.message.answer("✅ Основной питомец выбран. Можно перейти к разбору жалобы.", reply_markup=onb_step3_kb())
@@ -562,7 +563,7 @@ async def pet_card_callbacks(callback: CallbackQuery, state: FSMContext):
 
     if action == "unset_main":
         if clear_main_pet(user["id"]):
-            updated_pet = _normalize_pet(get_pet_by_id(pet_id))
+            updated_pet = _normalize_pet(get_pet_for_user(int(user["id"]), pet_id))
             text = _build_overview_text(updated_pet, owner_id=user["id"])
             await _safe_edit_text(callback.message, text, reply_markup=_pet_card_kb(pet_id))
             await _safe_callback_answer(callback, "Основной питомец снят")

@@ -658,6 +658,18 @@ def get_pet_by_id(pet_id: int):
     }
 
 
+def get_pet_for_user(owner_id: int, pet_id: int):
+    pet = get_pet_by_id(pet_id)
+    if not pet:
+        return None
+    try:
+        if int(pet.get("owner_id") or 0) != int(owner_id):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return pet
+
+
 def get_main_pet_id(owner_id: int) -> int | None:
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()

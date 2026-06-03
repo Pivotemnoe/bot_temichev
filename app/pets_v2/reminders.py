@@ -13,7 +13,7 @@ from app.services.safe_edit import safe_edit_message
 
 from app.db import (
     get_user_by_telegram_id,
-    get_pet_by_id,
+    get_pet_for_user,
     get_pet_reminders,
     create_reminder,
     get_user_reminders,
@@ -55,6 +55,35 @@ def _find_user_reminder(user_id: int, reminder_id: int) -> dict | None:
         except Exception:
             continue
     return None
+
+
+def _reminder_pet_id(reminder: dict) -> int | None:
+    try:
+        pet_id = int(reminder.get("pet_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    return pet_id or None
+
+
+async def _ensure_state_pet(
+    cb: CallbackQuery,
+    state: FSMContext,
+    user_id: int,
+    callback_pet_id: int,
+    *,
+    abort_text: str,
+) -> int | None:
+    data = await state.get_data()
+    try:
+        state_pet_id = int(data.get("pet_id") or 0)
+    except (TypeError, ValueError):
+        state_pet_id = 0
+    if state_pet_id != int(callback_pet_id) or not get_pet_for_user(user_id, state_pet_id):
+        await state.clear()
+        await cb.message.edit_text(abort_text, reply_markup=_back_to_reminders_kb(callback_pet_id))
+        await _safe_callback_answer(cb)
+        return None
+    return state_pet_id
 
 
 
@@ -151,7 +180,7 @@ async def reminders_add_start(cb: CallbackQuery, state: FSMContext):
     except ValueError:
         await cb.answer()
         return
-    pet = get_pet_by_id(pet_id)
+    pet = get_pet_for_user(int(user["id"]), pet_id)
     if not pet:
         await cb.answer("Питомец не найден", show_alert=True)
         return
@@ -228,6 +257,14 @@ async def reminders_add_periodicity(cb: CallbackQuery, state: FSMContext):
         )
         await _safe_callback_answer(cb)
         return
+    if await _ensure_state_pet(
+        cb,
+        state,
+        int(user["id"]),
+        pet_id,
+        abort_text="Создание напоминания было прервано. Начните добавление заново из карточки питомца.",
+    ) is None:
+        return
 
     await state.update_data(periodicity=code)
     await state.set_state(ReminderV2States.entering_notes)
@@ -247,6 +284,10 @@ async def reminders_add_notes(msg: Message, state: FSMContext):
         await msg.answer("Создание напоминания было прервано. Начните добавление заново из карточки питомца.")
         return
     pet_id = int(data["pet_id"])
+    if not get_pet_for_user(int(user["id"]), pet_id):
+        await state.clear()
+        await msg.answer("Питомец не найден. Начните добавление заново из карточки питомца.")
+        return
     notes_raw = (msg.text or "").strip()
     notes = None if notes_raw in ("-", "—", "") else notes_raw
 
@@ -291,6 +332,9 @@ async def reminders_edit_pick(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
+    if not get_pet_for_user(int(user["id"]), pet_id):
+        await cb.answer("Питомец не найден", show_alert=True)
+        return
     rems = get_pet_reminders(int(user["id"]), pet_id)
     if not rems:
         await cb.answer("Нет напоминаний", show_alert=True)
@@ -313,6 +357,9 @@ async def reminders_del_pick(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
+    if not get_pet_for_user(int(user["id"]), pet_id):
+        await cb.answer("Питомец не найден", show_alert=True)
+        return
     rems = get_pet_reminders(int(user["id"]), pet_id)
     if not rems:
         await cb.answer("Нет напоминаний", show_alert=True)
@@ -343,10 +390,14 @@ async def reminders_del_confirm(cb: CallbackQuery, state: FSMContext):
     if not r or int(r.get("user_id") or 0) != int(user["id"]):
         await cb.answer("Напоминание не найдено", show_alert=True)
         return
+    reminder_pet_id = _reminder_pet_id(r)
+    if reminder_pet_id != pet_id or not get_pet_for_user(int(user["id"]), reminder_pet_id):
+        await cb.answer("Напоминание не найдено", show_alert=True)
+        return
 
     await cb.message.edit_text(
         f"Удалить напоминание «{r.get('title') or 'напоминание'}»?",
-        reply_markup=_confirm_del_kb(rid, pet_id),
+        reply_markup=_confirm_del_kb(rid, reminder_pet_id),
     )
     await cb.answer()
 
@@ -369,11 +420,20 @@ async def reminders_del_do(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
+    r = _find_user_reminder(int(user["id"]), rid)
+    if not r or int(r.get("user_id") or 0) != int(user["id"]):
+        await cb.answer("Напоминание не найдено", show_alert=True)
+        return
+    reminder_pet_id = _reminder_pet_id(r)
+    if reminder_pet_id != pet_id or not get_pet_for_user(int(user["id"]), reminder_pet_id):
+        await cb.answer("Напоминание не найдено", show_alert=True)
+        return
+
     # мягкое удаление (is_active=0)
     deactivate_reminder(rid, user_id=int(user["id"]))
     try:
         add_pet_history_event(
-            pet_id=pet_id,
+            pet_id=reminder_pet_id,
             event_type="reminder",
             title="Напоминание удалено",
             details=f"ID: {rid}",
@@ -409,9 +469,13 @@ async def reminders_edit_start(cb: CallbackQuery, state: FSMContext):
     if not r or int(r.get("user_id") or 0) != int(user["id"]):
         await cb.answer("Напоминание не найдено", show_alert=True)
         return
+    reminder_pet_id = _reminder_pet_id(r)
+    if reminder_pet_id != pet_id or not get_pet_for_user(int(user["id"]), reminder_pet_id):
+        await cb.answer("Напоминание не найдено", show_alert=True)
+        return
 
     await state.clear()
-    await state.update_data(reminder_id=rid, pet_id=pet_id)
+    await state.update_data(reminder_id=rid, pet_id=reminder_pet_id)
     await state.set_state(ReminderV2States.editing_title)
     await cb.message.edit_text(
         f"✏️ Изменение напоминания\n\nТекущий заголовок: {r.get('title')}\n\nВведите новый заголовок (или «-» чтобы оставить):"
@@ -467,6 +531,10 @@ async def reminders_edit_time(msg: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("petrem:edit:period:"))
 async def reminders_edit_periodicity(cb: CallbackQuery, state: FSMContext):
+    user = get_user_by_telegram_id(cb.from_user.id)
+    if not user:
+        await _safe_callback_answer(cb, "Нажмите /start", show_alert=True)
+        return
     parts = (cb.data or "").split(":")
     # petrem:edit:period:<code>:<pet_id>
     if len(parts) != 5:
@@ -488,6 +556,14 @@ async def reminders_edit_periodicity(cb: CallbackQuery, state: FSMContext):
         )
         await _safe_callback_answer(cb)
         return
+    if await _ensure_state_pet(
+        cb,
+        state,
+        int(user["id"]),
+        pet_id,
+        abort_text="Редактирование было прервано. Откройте напоминания питомца и начните изменение заново.",
+    ) is None:
+        return
 
     await state.update_data(periodicity=code)
     await state.set_state(ReminderV2States.editing_notes)
@@ -508,6 +584,16 @@ async def reminders_edit_notes(msg: Message, state: FSMContext):
         return
     rid = int(data["reminder_id"])
     pet_id = int(data["pet_id"])
+    r = _find_user_reminder(int(user["id"]), rid)
+    if not r or int(r.get("user_id") or 0) != int(user["id"]):
+        await state.clear()
+        await msg.answer("Напоминание не найдено. Откройте карточку питомца и начните изменение заново.")
+        return
+    reminder_pet_id = _reminder_pet_id(r)
+    if reminder_pet_id != pet_id or not get_pet_for_user(int(user["id"]), reminder_pet_id):
+        await state.clear()
+        await msg.answer("Питомец не найден. Откройте карточку питомца и начните изменение заново.")
+        return
 
     notes_raw = (msg.text or "").strip()
     # '-' => оставить как есть
@@ -526,7 +612,7 @@ async def reminders_edit_notes(msg: Message, state: FSMContext):
     update_reminder(rid, int(user["id"]), **kwargs)
     try:
         add_pet_history_event(
-            pet_id=pet_id,
+            pet_id=reminder_pet_id,
             event_type="reminder",
             title="Напоминание обновлено",
             details=(kwargs.get("title") or "").strip() or None,

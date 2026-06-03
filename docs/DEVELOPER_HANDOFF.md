@@ -24,6 +24,8 @@ TemichevVet - Telegram-бот для владельцев кошек и соба
 - `.env.example` - пример переменных окружения без секретов.
 - `docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md` - что уже сделано и проверено.
 - `docs/SECURITY_PLAN_2026-06-01.md` - защита админки и платежей.
+- `docs/THREAT_MODEL.md` - что защищаем и какие обходы нельзя допускать.
+- `docs/SECURITY_CHECKLIST.md` - security-проверки перед PR, релизом, VPS и инцидентами.
 - `docs/ARCHITECTURE.md` - архитектура модулей и потоков.
 - `docs/TESTING.md` - как проверять изменения.
 - `docs/OPERATIONS_RUNBOOK.md` - эксплуатация, бэкапы, откат.
@@ -106,6 +108,12 @@ git diff --check
 .venv/bin/python tools/check_knowledge_json.py
 ```
 
+Проверка секретов и опасных tracked-файлов:
+
+```bash
+make security-check
+```
+
 Если изменение затрагивает Telegram UX, после локальных проверок запустить тестового бота и проверить сценарий вручную.
 
 ## 7. Git-процесс
@@ -158,4 +166,6 @@ git commit -m "Short clear message"
 - Не выдавать Plus без подтверждения платежа.
 - Не добавлять админ-доступ через общий чат.
 - В `production` обязательно нужен `ADMIN_IDS`.
+- Не доверять `pet_id`, `reminder_id`, `payment_id` из callback без проверки владельца.
+- Перед PR и релизом запускать `make security-check`.
 - Все продуктовые изменения сначала проверять на тестовом Telegram-боте.

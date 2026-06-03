@@ -80,6 +80,8 @@ docker compose up --build
 - [VPS deployment](docs/DEPLOYMENT_VPS.md) — безопасный деплой рядом со старой версией.
 - [Release checklist](docs/RELEASE_CHECKLIST.md) — чеклист перед публикацией.
 - [Security plan](docs/SECURITY_PLAN_2026-06-01.md) — защита админки, платежей и секретов.
+- [Threat model](docs/THREAT_MODEL.md) — что защищаем и какие обходы нельзя допускать.
+- [Security checklist](docs/SECURITY_CHECKLIST.md) — проверки перед PR, релизом, VPS и инцидентами.
 - [Security policy](SECURITY.md) — правила по секретам и security-проблемам.
 - [Final report](docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md) — итоговый статус проекта и дальнейший план.
 - [Workplan](docs/WORKPLAN.md) — история выполненных этапов.
@@ -92,6 +94,8 @@ docker compose up --build
 - Неавторизованные попытки открыть `админ` или нажать админ-кнопки логируются и отправляются в `ADMIN_CHAT_ID` с ограничением частоты уведомлений.
 - `.env`, токены бота, YooKassa-ключи, база и логи не должны попадать в git или прод-архив.
 - Plus выдаётся только после проверки платежа у YooKassa: статус `succeeded`, `paid=true`, валюта `RUB`, ожидаемая сумма и metadata текущего пользователя.
+- Перед PR и релизом запускать `make security-check`; он ищет токены и секреты в git-visible файлах без вывода секретов целиком.
+- Новые обработчики с `pet_id`, `reminder_id`, `payment_id` обязаны заново проверять владельца данных, а не доверять callback-кнопке.
 
 ## Структура проекта
 

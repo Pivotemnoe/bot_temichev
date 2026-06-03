@@ -1,8 +1,8 @@
-.PHONY: check compile selftest knowledge-check docker-config docker-build docker-selftest status
+.PHONY: check compile selftest knowledge-check security-check docker-config docker-build docker-selftest status
 
 PYTHON ?= .venv/bin/python
 
-check: compile selftest knowledge-check
+check: compile selftest knowledge-check security-check
 
 compile:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m compileall -q app tools main.py
@@ -12,6 +12,9 @@ selftest:
 
 knowledge-check:
 	$(PYTHON) tools/check_knowledge_json.py
+
+security-check:
+	$(PYTHON) tools/check_secrets.py
 
 docker-config:
 	docker compose config

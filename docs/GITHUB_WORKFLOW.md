@@ -43,6 +43,7 @@ docs/vps-runbook
 
 ```bash
 make check
+make security-check
 make docker-config
 ```
 
@@ -95,3 +96,16 @@ GitHub Actions workflow пока не добавлен в репозиторий
 - токены;
 - базу;
 - платежные ключи.
+
+## 7. Защита репозитория
+
+Рекомендуемые настройки GitHub для `main`:
+
+- включить branch protection;
+- запретить прямой push в `main` всем, кроме владельца, или полностью работать через PR;
+- требовать review перед merge;
+- требовать прохождение локального чеклиста из `docs/SECURITY_CHECKLIST.md`;
+- включить 2FA для аккаунтов с write/admin доступом;
+- включить secret scanning, если тариф GitHub позволяет.
+
+Важно: GitHub Actions workflow сейчас не добавлен из-за отсутствия `workflow` scope у текущего токена. После обновления токена можно добавить CI, но production-секреты не должны попадать в workflow без отдельной необходимости.

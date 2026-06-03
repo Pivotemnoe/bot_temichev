@@ -156,6 +156,12 @@ async def vacc_waiting_date(message: Message, state: FSMContext):
         await message.answer("Сначала зарегистрируйтесь через /start.", reply_markup=main_menu_kb())
         return
 
+    pet = next((p for p in get_user_pets(user["id"]) if p["id"] == pet_id), None)
+    if not pet:
+        await state.clear()
+        await message.answer("Питомец не найден.", reply_markup=main_menu_kb())
+        return
+
     try:
         add_pet_vaccination(pet_id=pet_id, vaccine_name=name, vaccinated_at=iso)
     except TypeError:
@@ -176,10 +182,5 @@ async def vacc_waiting_date(message: Message, state: FSMContext):
 
 
     await state.clear()
-    # показать список снова
-    pet = next((p for p in get_user_pets(user["id"]) if p["id"] == pet_id), None)
-    if pet:
-        await message.answer("✅ Вакцинация добавлена.")
-        await _show_vaccinations(message, pet)
-    else:
-        await message.answer("✅ Вакцинация добавлена.", reply_markup=main_menu_kb())
+    await message.answer("✅ Вакцинация добавлена.")
+    await _show_vaccinations(message, pet)

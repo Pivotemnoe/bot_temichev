@@ -12,6 +12,7 @@
 
 ```bash
 make check
+make security-check
 git diff --check
 ```
 
@@ -24,6 +25,13 @@ git diff --check
 - `.venv/`;
 - `__pycache__/`;
 - архивы с боевой базой.
+
+## Security-правила для кода
+
+- Callback-кнопка не доказывает право доступа. Если в callback есть `pet_id`, `reminder_id`, `payment_id` или похожий ID, обработчик должен заново проверить текущего пользователя.
+- Для питомцев использовать owner-check через `get_pet_for_user(owner_id, pet_id)` или эквивалентную проверку.
+- Админские сценарии должны быть доступны только Telegram ID из `ADMIN_IDS`.
+- Plus нельзя выдавать без серверной проверки платежа.
 
 ## Как оформлять коммиты
 
@@ -76,5 +84,7 @@ docker compose up
 - `docs/GITHUB_WORKFLOW.md`;
 - `docs/DEPLOYMENT_VPS.md`;
 - `docs/SECURITY_PLAN_2026-06-01.md`;
+- `docs/THREAT_MODEL.md`;
+- `docs/SECURITY_CHECKLIST.md`;
 - `docs/FINAL_REPORT_AND_NEXT_PLAN_2026-06-01.md`;
 - `docs/WORKPLAN.md`.
