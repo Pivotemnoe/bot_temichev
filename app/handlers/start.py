@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 
 from app.start_texts import START_WELCOME, START_NEED_REGISTER, START_RETURNING_USER
+from app.texts import MAIN_MENU_GUIDE_TEXT
 from app.handlers.onboarding import maybe_show_onboarding_after_start, show_step3
 
 from app.db import (
@@ -154,6 +155,8 @@ def _faq_after_start_text() -> str:
         "Можно посмотреть питание, уход и ответы на частые вопросы. Для разборов, истории "
         "и напоминаний лучше добавить питомца."
     )
+
+    lines.append(MAIN_MENU_GUIDE_TEXT)
 
     return "\n".join(lines)
 

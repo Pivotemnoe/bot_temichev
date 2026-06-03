@@ -18,7 +18,7 @@ from app.db import (
 )
 from app.keyboards import main_menu_kb
 from app.texts import (
-    ABOUT_TEXT,
+    HELP_TEXT,
     FEEDBACK_INTRO_TEXT,
     FEEDBACK_THANKS_TEXT,
     FEEDBACK_ADMIN_TEMPLATE,
@@ -77,9 +77,9 @@ def _format_pet_info(user_id: int | None) -> str:
 async def cmd_help(message: Message) -> None:
     """
     Текст «О боте».
-    Использует ABOUT_TEXT из app.texts.
+    Использует HELP_TEXT из app.texts.
     """
-    await message.answer(ABOUT_TEXT, reply_markup=main_menu_kb())
+    await message.answer(HELP_TEXT, reply_markup=main_menu_kb())
 
 
 # ===== /feedback и кнопка «✉️ Обратная связь» =====

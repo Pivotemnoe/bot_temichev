@@ -11,7 +11,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.state import default_state
 
 from app.keyboards import main_menu_kb, subscription_kb
-from app.texts import ABOUT_TEXT, INVALID_INPUT_TEXT
+from app.texts import ABOUT_TEXT, INVALID_INPUT_TEXT, MAIN_MENU_GUIDE_TEXT
 from app.system_texts import MAIN_MENU_TITLE, BACK_TO_MAIN_MENU_TEXT, UNKNOWN_STEP_TEXT
 from app.knowledge_texts import (
     NUTRITION_SECTION_TEXT,
@@ -726,7 +726,7 @@ async def about_bot(message: Message):
     except Exception as e:
         logger.warning("Не удалось отправить логотип в about_bot: %r", e)
 
-    await message.answer(ABOUT_TEXT, reply_markup=main_menu_kb())
+    await message.answer(f"{ABOUT_TEXT}\n\n{MAIN_MENU_GUIDE_TEXT}", reply_markup=main_menu_kb())
 
 
 @router.message(

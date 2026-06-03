@@ -177,16 +177,16 @@ def check_analytics_events_and_reports() -> None:
     assert stats["subscriptions"]["plus"] == 1
 
     report = render_admin_period_report("Тест", date_from, date_to)
-    assert "Starts" in report
-    assert "Payments" in report
+    assert "Запуски" in report
+    assert "Оплаты" in report
 
     sources_report = render_admin_sources_report("Тест", date_from, date_to)
     assert "tg" in sources_report
 
     csv_text = render_admin_csv_export("Тест", date_from, date_to).decode("utf-8-sig")
-    assert "section,metric,key,value" in csv_text
-    assert "counts,app_start,,1" in csv_text
-    assert "sources_utm_source,starts,tg,1" in csv_text
+    assert "Раздел,Метрика,Ключ,Значение" in csv_text
+    assert "События,Запуски,,1" in csv_text
+    assert "Источники,Запуски,tg,1" in csv_text
 
 
 def main() -> None:
