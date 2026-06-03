@@ -39,7 +39,13 @@ from app.db import (  # noqa: E402
     set_subscription_plan,
     update_payment_status,
 )
-from app.keyboards import payment_created_kb, plus_checkout_kb, subscription_kb  # noqa: E402
+from app.keyboards import payment_created_kb, plus_checkout_kb, subscription_inline_kb, subscription_kb  # noqa: E402
+from app.handlers.menu import (  # noqa: E402
+    EXTRA_REQUEST_BUTTON,
+    EXTRA_REQUEST_IN_DEVELOPMENT_TEXT,
+    buy_extra_request,
+    callback_buy_extra_request,
+)
 from app.payments.yookassa import build_payment_payload, build_receipt  # noqa: E402
 from app.services.payment_reconcile import reconcile_yookassa_payments  # noqa: E402
 
@@ -61,11 +67,51 @@ def check_keyboards() -> None:
     assert set(SUBSCRIPTION_BUTTONS) <= texts
     assert "✅ Я оплатил (проверить)" in texts
     assert "📋 Все тарифы" in texts
+    assert EXTRA_REQUEST_BUTTON in texts
 
     assert _inline_callbacks(plus_checkout_kb()) == {"pay:plus", "sub:back"}
+    assert {
+        "sub:choose:free",
+        "sub:choose:plus",
+        "sub:choose:pro",
+        "sub:buy_extra",
+        "sub:unsubscribe",
+        "open:main_menu",
+    } <= _inline_callbacks(subscription_inline_kb(current_plan="plus"))
     payment_kb = payment_created_kb("https://pay.test/link")
     assert {"pay:check", "sub:back"} <= _inline_callbacks(payment_kb)
     assert "https://pay.test/link" in _inline_urls(payment_kb)
+
+
+class _FakeMessage:
+    def __init__(self) -> None:
+        self.answers: list[tuple[str, object]] = []
+
+    async def answer(self, text: str, reply_markup=None):
+        self.answers.append((text, reply_markup))
+
+
+class _FakeCallback:
+    def __init__(self) -> None:
+        self.message = _FakeMessage()
+        self.answers: list[tuple[str | None, bool | None]] = []
+
+    async def answer(self, text: str | None = None, show_alert: bool | None = None):
+        self.answers.append((text, show_alert))
+
+
+async def check_extra_request_stub() -> None:
+    message = _FakeMessage()
+    await buy_extra_request(message)
+    assert message.answers
+    assert message.answers[0][0] == EXTRA_REQUEST_IN_DEVELOPMENT_TEXT
+    assert "в разработке" in message.answers[0][0]
+
+    callback = _FakeCallback()
+    await callback_buy_extra_request(callback)
+    assert callback.message.answers
+    assert callback.message.answers[0][0] == EXTRA_REQUEST_IN_DEVELOPMENT_TEXT
+    assert callback.answers == [("Функция в разработке", None)]
 
 
 def check_yookassa_payload() -> None:
@@ -173,6 +219,7 @@ async def check_payment_reconcile_flow() -> None:
 
 def main() -> None:
     check_keyboards()
+    asyncio.run(check_extra_request_stub())
     check_yookassa_payload()
     check_payment_db_flow()
     asyncio.run(check_payment_reconcile_flow())

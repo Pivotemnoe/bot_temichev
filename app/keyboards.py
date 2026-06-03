@@ -61,9 +61,11 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 def nutrition_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✔️ Что можно")],
-            [KeyboardButton(text="❌ Что нельзя")],
-            [KeyboardButton(text="🔎 Поиск продукта")],
+            [KeyboardButton(text="🔍 Найти продукт")],
+            [
+                KeyboardButton(text="✅ Что можно"),
+                KeyboardButton(text="⛔ Что нельзя"),
+            ],
             [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,

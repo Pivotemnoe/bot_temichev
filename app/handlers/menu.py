@@ -38,7 +38,7 @@ from app.db import (
 )
 from app.texts import INVALID_INPUT_TEXT
 from app.system_texts import MAIN_MENU_TITLE
-from app.constants import SUBSCRIPTION_BUTTONS, SUBSCRIPTION_PLANS, build_subscription_text
+from app.constants import EXTRA_REQUEST_PRICE_RUB, SUBSCRIPTION_BUTTONS, SUBSCRIPTION_PLANS, build_subscription_text
 from app.texts import PLAN_FREE_TEXT, PLAN_PLUS_TEMPLATE, PLAN_PRO_TEMPLATE, PLAN_VIP_TEMPLATE
 from app.keyboards_reminders import reminders_menu_kb
 from app.keyboards_knowledge import faq_menu_kb
@@ -51,6 +51,15 @@ from app.ux import BTN_MENU
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+EXTRA_REQUEST_BUTTON = f"➕ Купить 1 доп. запрос ({EXTRA_REQUEST_PRICE_RUB} ₽)"
+
+EXTRA_REQUEST_IN_DEVELOPMENT_TEXT = (
+    "Покупка одного дополнительного запроса пока в разработке.\n\n"
+    "Сейчас безопасно работает Plus: 200 ₽ за 30 дней, до 10 разборов по здоровью, "
+    "расширенная история и напоминания.\n\n"
+    "Можно подключить Plus или вернуться в меню подписки."
+)
 
 
 def _format_user_period_end(value: str | None) -> str | None:
@@ -130,6 +139,7 @@ MAIN_MENU_BUTTONS = (
     "🎯 Как пользоваться",
     "📋 Все тарифы",
     "✅ Я оплатил (проверить)",
+    EXTRA_REQUEST_BUTTON,
 )
 
 
@@ -268,25 +278,12 @@ async def back_to_main_menu(message: Message, state: FSMContext):
 # ================= Выбор тарифа по кнопке =================
 
 
-@router.message(F.text.in_(list(SUBSCRIPTION_BUTTONS.keys())))
-async def change_subscription_plan(message: Message):
-    _state = None
-    logger.info("[HANDLER] app/handlers/menu.py:change_subscription_plan user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
-    tg_id = message.from_user.id
-    user = get_user_by_telegram_id(tg_id)
+async def _handle_subscription_plan_code(message: Message, telegram_id: int, plan_code: str | None) -> None:
+    user = get_user_by_telegram_id(telegram_id)
     if user is None:
         await message.answer(
             "Вы ещё не зарегистрированы. Сначала используйте /start.",
             reply_markup=main_menu_kb(),
-        )
-        return
-
-    button_text = (message.text or "").strip()
-    plan_code = SUBSCRIPTION_BUTTONS.get(button_text)
-    if plan_code is None:
-        await message.answer(
-            "Не удалось определить тариф. Попробуйте выбрать ещё раз.",
-            reply_markup=subscription_kb(),
         )
         return
 
@@ -302,12 +299,49 @@ async def change_subscription_plan(message: Message):
         await message.answer(VIP_PLAN_DESCRIPTION, reply_markup=pro_vip_back_kb())
         return
 
+    if plan_code != "free":
+        await message.answer(
+            "Не удалось определить тариф. Попробуйте выбрать ещё раз.",
+            reply_markup=subscription_kb(),
+        )
+        return
+
     set_subscription_plan(user["id"], plan_code)
     sub = get_subscription(user["id"])
+    await message.answer(build_subscription_text(sub), reply_markup=subscription_kb())
 
-    text = build_subscription_text(sub)
 
-    await message.answer(text, reply_markup=subscription_kb())
+@router.message(F.text.in_(list(SUBSCRIPTION_BUTTONS.keys())))
+async def change_subscription_plan(message: Message):
+    _state = None
+    logger.info("[HANDLER] app/handlers/menu.py:change_subscription_plan user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
+    button_text = (message.text or "").strip()
+    plan_code = SUBSCRIPTION_BUTTONS.get(button_text)
+    await _handle_subscription_plan_code(message, message.from_user.id, plan_code)
+
+
+@router.callback_query(F.data.startswith("sub:choose:"))
+async def callback_choose_subscription_plan(callback: CallbackQuery):
+    if callback.message is None:
+        await callback.answer()
+        return
+    plan_code = (callback.data or "").split(":")[-1]
+    await _handle_subscription_plan_code(callback.message, callback.from_user.id, plan_code)
+    await callback.answer()
+
+
+@router.message(F.text == EXTRA_REQUEST_BUTTON)
+async def buy_extra_request(message: Message):
+    await message.answer(EXTRA_REQUEST_IN_DEVELOPMENT_TEXT, reply_markup=subscription_kb())
+
+
+@router.callback_query(F.data == "sub:buy_extra")
+async def callback_buy_extra_request(callback: CallbackQuery):
+    if callback.message is None:
+        await callback.answer()
+        return
+    await callback.message.answer(EXTRA_REQUEST_IN_DEVELOPMENT_TEXT, reply_markup=subscription_kb())
+    await callback.answer("Функция в разработке")
 
 
 @router.callback_query(F.data == "sub:back")

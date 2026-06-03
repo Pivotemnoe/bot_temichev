@@ -19,7 +19,11 @@ UNSUBSCRIBE_TEXT = "🚪 Отписаться и удалить доступ"
 async def unsubscribe_start(message: Message):
     """Запрос подтверждения отключения подписки (downgrade до Free)."""
     tg_id = message.from_user.id
-    user = get_user_by_telegram_id(tg_id)
+    await _send_unsubscribe_confirmation(message, tg_id)
+
+
+async def _send_unsubscribe_confirmation(message: Message, telegram_id: int) -> None:
+    user = get_user_by_telegram_id(telegram_id)
     if user is None:
         await message.answer(
             "Сначала нажмите /start, чтобы зарегистрироваться.",
@@ -40,9 +44,19 @@ async def unsubscribe_start(message: Message):
 
     await message.answer(
         "Вы уверены, что хотите отключить подписку?"
-        "После отключения ваш тариф станет Free.",
+        "\n\nПосле отключения ваш тариф станет Free.",
         reply_markup=subscription_unsubscribe_confirm_kb(),
     )
+
+
+@router.callback_query(F.data == "sub:unsubscribe")
+async def unsubscribe_start_callback(call: CallbackQuery):
+    """Inline-вход в подтверждение отключения подписки."""
+    if call.message is None:
+        await call.answer()
+        return
+    await _send_unsubscribe_confirmation(call.message, call.from_user.id)
+    await call.answer()
 
 
 @router.callback_query(F.data == "sub:unsubscribe:cancel")
