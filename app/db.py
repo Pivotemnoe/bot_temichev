@@ -18,6 +18,9 @@ def get_connection() -> sqlite3.Connection:
 from .constants import SUBSCRIPTION_PLANS
 
 
+FREE_HEALTH_TRIAL_DAYS = 30
+
+
 def _column_exists(cur: sqlite3.Cursor, table_name: str, column_name: str) -> bool:
     cur.execute(f"PRAGMA table_info({table_name})")
     return any(row[1] == column_name for row in cur.fetchall())
@@ -1038,6 +1041,21 @@ def get_subscription(user_id: int):
         "period_start": row[4],
         "period_end": row[5],
     }
+    if str(sub.get("plan") or "free").lower() == "free":
+        quota_total, quota_used = _free_subscription_quota_state_for_user(user_id)
+        if int(sub.get("quota_total") or 0) != quota_total or int(sub.get("quota_used") or 0) != quota_used:
+            with closing(sqlite3.connect(DB_PATH)) as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET quota_total = ?, quota_used = ?, period_end = NULL
+                    WHERE user_id = ?
+                    """,
+                    (quota_total, quota_used, user_id),
+                )
+                conn.commit()
+            return get_subscription(user_id)
     if _subscription_is_expired(sub):
         set_subscription_plan(user_id, "free")
         return get_subscription(user_id)
@@ -1062,17 +1080,85 @@ def _subscription_is_expired(subscription: dict) -> bool:
     return end_at <= datetime.now(timezone.utc)
 
 
+def _parse_subscription_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _user_registered_at(cur: sqlite3.Cursor, user_id: int) -> datetime | None:
+    cur.execute("SELECT registered_at FROM users WHERE id = ?", (int(user_id),))
+    row = cur.fetchone()
+    return _parse_subscription_dt(row[0]) if row else None
+
+
+def _free_health_usage_count(cur: sqlite3.Cursor, user_id: int, registered_at: datetime) -> int:
+    trial_end = registered_at + timedelta(days=FREE_HEALTH_TRIAL_DAYS)
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM user_events
+            WHERE user_id = ?
+              AND event_type = 'triage_completed'
+              AND COALESCE(NULLIF(json_extract(payload, '$.plan_code'), ''), 'free') = 'free'
+              AND COALESCE(NULLIF(json_extract(payload, '$.medical_safety'), ''), '') != 'red_flag_pre_llm'
+              AND created_at >= ?
+              AND created_at < ?
+            """,
+            (int(user_id), registered_at.isoformat(), trial_end.isoformat()),
+        )
+        row = cur.fetchone()
+    except sqlite3.OperationalError:
+        return 0
+    return int((row or (0,))[0] or 0)
+
+
+def _free_subscription_quota_state(cur: sqlite3.Cursor, user_id: int) -> tuple[int, int]:
+    registered_at = _user_registered_at(cur, user_id)
+    if registered_at is None:
+        return 0, 0
+
+    if datetime.now(timezone.utc) > registered_at + timedelta(days=FREE_HEALTH_TRIAL_DAYS):
+        return 0, 0
+
+    total = int(SUBSCRIPTION_PLANS["free"]["quota_total"])
+    used = _free_health_usage_count(cur, user_id, registered_at)
+    cur.execute("SELECT plan, quota_used FROM subscriptions WHERE user_id = ?", (int(user_id),))
+    row = cur.fetchone()
+    if row and str(row[0] or "").lower() == "free":
+        used = max(used, int(row[1] or 0))
+    used = min(total, used)
+    return total, used
+
+
+def _free_subscription_quota_state_for_user(user_id: int) -> tuple[int, int]:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        return _free_subscription_quota_state(cur, user_id)
+
+
 def _create_subscription(user_id: int, plan_code: str):
     now = _utc_now_iso()
     plan = SUBSCRIPTION_PLANS[plan_code]
+    quota_total = int(plan["quota_total"])
+    quota_used = 0
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
+        if plan_code == "free":
+            quota_total, quota_used = _free_subscription_quota_state(cur, user_id)
         cur.execute(
             """
             INSERT INTO subscriptions (user_id, plan, quota_total, quota_used, period_start, period_end)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, plan_code, plan["quota_total"], 0, now, None),
+            (user_id, plan_code, quota_total, quota_used, now, None),
         )
 
         # Обратная связь (feedback пользователей)
@@ -1106,13 +1192,22 @@ def ensure_default_subscription(user_id: int):
 
 def set_subscription_plan(user_id: int, plan_code: str, period_end: str | None = None):
     """
-    Установить тариф (free/plus/pro/vip), сбросить счётчик quota_used.
+    Установить тариф (free/plus/pro/vip).
+
+    Для платных тарифов счётчик периода начинается с нуля.
+    Для Free нельзя выдавать стартовый лимит повторно: он доступен только
+    первые 30 дней после регистрации и учитывает уже завершённые Free-разборы.
     """
     now = _utc_now_iso()
     plan = SUBSCRIPTION_PLANS[plan_code]
     normalized_period_end = None if plan_code == "free" else period_end
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
+        if plan_code == "free":
+            quota_total, quota_used = _free_subscription_quota_state(cur, user_id)
+        else:
+            quota_total = int(plan["quota_total"])
+            quota_used = 0
         # проверяем, есть ли уже подписка
         cur.execute(
             "SELECT id FROM subscriptions WHERE user_id = ?",
@@ -1124,19 +1219,19 @@ def set_subscription_plan(user_id: int, plan_code: str, period_end: str | None =
             cur.execute(
                 """
                 INSERT INTO subscriptions (user_id, plan, quota_total, quota_used, period_start, period_end)
-                VALUES (?, ?, ?, 0, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, plan_code, plan["quota_total"], now, normalized_period_end),
+                (user_id, plan_code, quota_total, quota_used, now, normalized_period_end),
             )
         else:
             # обновляем
             cur.execute(
                 """
                 UPDATE subscriptions
-                SET plan = ?, quota_total = ?, quota_used = 0, period_start = ?, period_end = ?
+                SET plan = ?, quota_total = ?, quota_used = ?, period_start = ?, period_end = ?
                 WHERE user_id = ?
                 """,
-                (plan_code, plan["quota_total"], now, normalized_period_end, user_id),
+                (plan_code, quota_total, quota_used, now, normalized_period_end, user_id),
             )
 
         # Обратная связь (feedback пользователей)

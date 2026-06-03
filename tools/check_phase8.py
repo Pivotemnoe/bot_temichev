@@ -36,6 +36,7 @@ from app.db import (  # noqa: E402
     get_subscription,
     init_db,
     list_payment_records,
+    log_user_event,
     payment_records_summary,
     set_subscription_plan,
     try_consume_quota,
@@ -207,6 +208,47 @@ async def check_free_button_does_not_downgrade_paid_plan() -> None:
     assert "Отписаться" in message.answers[0][0]
 
 
+def _set_registered_at(user_id: int, value: str) -> None:
+    with sqlite3.connect(tmp.name) as conn:
+        conn.execute("UPDATE users SET registered_at = ? WHERE id = ?", (value, user_id))
+        conn.commit()
+
+
+def check_free_downgrade_keeps_trial_usage() -> None:
+    init_db()
+    telegram_id = 880190
+    user_id = create_user(telegram_id=telegram_id, name="Phase8 Free Trial")
+    log_user_event(user_id, "triage_completed", {"plan_code": "free"})
+
+    activate_plus(user_id)
+    set_subscription_plan(user_id, "free")
+
+    sub = get_subscription(user_id)
+    assert sub["plan"] == "free"
+    assert sub["quota_total"] == 5
+    assert sub["quota_used"] == 1
+
+
+def check_free_downgrade_after_trial_has_no_health_quota() -> None:
+    init_db()
+    telegram_id = 880191
+    user_id = create_user(telegram_id=telegram_id, name="Phase8 Expired Free")
+    old_registered_at = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+    _set_registered_at(user_id, old_registered_at)
+
+    activate_plus(user_id)
+    set_subscription_plan(user_id, "free")
+
+    sub = get_subscription(user_id)
+    assert sub["plan"] == "free"
+    assert sub["quota_total"] == 0
+    assert sub["quota_used"] == 0
+    ok, sub_after = try_consume_quota(user_id, amount=1)
+    assert not ok
+    assert sub_after["quota_total"] == 0
+    assert sub_after["quota_used"] == 0
+
+
 def check_yookassa_payload() -> None:
     payload = build_payment_payload(
         amount_rub=200,
@@ -318,6 +360,8 @@ def main() -> None:
     asyncio.run(check_extra_request_stub())
     asyncio.run(check_current_plan_click_does_not_reset_quota())
     asyncio.run(check_free_button_does_not_downgrade_paid_plan())
+    check_free_downgrade_keeps_trial_usage()
+    check_free_downgrade_after_trial_has_no_health_quota()
     check_yookassa_payload()
     check_payment_db_flow()
     asyncio.run(check_payment_reconcile_flow())
