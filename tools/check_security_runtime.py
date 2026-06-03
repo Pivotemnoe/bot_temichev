@@ -20,10 +20,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.db import create_user, get_subscription, init_db, list_admin_audit_events, log_admin_audit_event  # noqa: E402
+from app.db import (  # noqa: E402
+    create_payment_record,
+    create_user,
+    get_subscription,
+    init_db,
+    list_admin_audit_events,
+    log_admin_audit_event,
+)
 from app.handlers.admin import (  # noqa: E402
     _parse_manual_plus_command,
     apply_manual_subscription_change,
+    render_admin_payments_report,
     render_admin_status_report,
 )
 from app.middlewares.rate_limit import RateLimitMiddleware, RULES  # noqa: E402
@@ -80,6 +88,24 @@ def check_manual_plus_change() -> None:
     assert (get_subscription(user_id) or {}).get("plan") == "free"
 
 
+def check_admin_payment_report() -> None:
+    user_id = create_user(telegram_id=777002, name="Payment Report Test")
+    create_payment_record(
+        user_id=user_id,
+        provider="yookassa",
+        provider_payment_id="pay_admin_report_1",
+        plan_code="plus",
+        amount_rub=200,
+        status="validation_failed",
+        raw_payload={"id": "pay_admin_report_1", "status": "succeeded"},
+    )
+    report = render_admin_payments_report("Тест", "2026-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+    assert "Создано платежей" in report
+    assert "Не прошли проверку" in report
+    assert "777002" in report
+    assert "200 ₽" in report
+
+
 def check_rate_limit() -> None:
     limiter = RateLimitMiddleware()
     rule = RULES["start"]
@@ -97,6 +123,7 @@ def main() -> None:
     check_admin_audit()
     check_admin_status_has_no_secrets()
     check_manual_plus_change()
+    check_admin_payment_report()
     check_rate_limit()
     print("security runtime checks ok")
 

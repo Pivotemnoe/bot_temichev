@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -32,10 +34,14 @@ from app.db import (  # noqa: E402
     get_last_payment,
     get_subscription,
     init_db,
+    list_payment_records,
+    payment_records_summary,
+    set_subscription_plan,
     update_payment_status,
 )
 from app.keyboards import payment_created_kb, plus_checkout_kb, subscription_kb  # noqa: E402
 from app.payments.yookassa import build_payment_payload, build_receipt  # noqa: E402
+from app.services.payment_reconcile import reconcile_yookassa_payments  # noqa: E402
 
 
 def _reply_texts(markup) -> set[str]:
@@ -65,7 +71,7 @@ def check_keyboards() -> None:
 def check_yookassa_payload() -> None:
     payload = build_payment_payload(
         amount_rub=200,
-        description="TemichevVet Plus — подписка на 1 месяц",
+        description="TemichevVet Plus — доступ на 30 дней",
         metadata={"user_id": 1, "telegram_id": 2, "plan_code": "plus"},
     )
     assert payload["amount"] == {"value": "200.00", "currency": "RUB"}
@@ -112,12 +118,64 @@ def check_payment_db_flow() -> None:
     sub = get_subscription(user_id)
     assert sub["plan"] == "plus"
     assert sub["quota_total"] == 10
+    assert sub["period_end"]
+
+    records = list_payment_records(provider="yookassa", limit=5)
+    assert records
+    assert records[0]["telegram_id"] == 880088
+
+    summary = payment_records_summary("2026-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+    assert summary["created"] >= 1
+    assert summary["succeeded"] >= 1
+    assert summary["succeeded_amount_rub"] >= 200
+
+    expired_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    set_subscription_plan(user_id, "plus", period_end=expired_at)
+    assert get_subscription(user_id)["plan"] == "free"
+
+
+async def check_payment_reconcile_flow() -> None:
+    user_id = create_user(telegram_id=880099, name="Phase8 Reconcile")
+    create_payment_record(
+        user_id=user_id,
+        provider="yookassa",
+        provider_payment_id="pay_reconcile_1",
+        plan_code="plus",
+        amount_rub=200,
+        status="pending",
+        raw_payload={"id": "pay_reconcile_1", "status": "pending"},
+    )
+
+    async def fake_get_payment(payment_id: str) -> dict:
+        assert payment_id == "pay_reconcile_1"
+        return {
+            "id": payment_id,
+            "status": "succeeded",
+            "paid": True,
+            "amount": {"value": "200.00", "currency": "RUB"},
+            "metadata": {"user_id": user_id, "telegram_id": 880099, "plan_code": "plus"},
+            "captured_at": "2026-06-01T09:00:00+00:00",
+            "created_at": "2026-06-01T08:59:00+00:00",
+        }
+
+    result = await reconcile_yookassa_payments(limit=1, fetch_payment=fake_get_payment)
+    assert result["checked"] == 1
+    assert result["activated"] == 1
+    assert result["validation_failed"] == 0
+    sub = get_subscription(user_id)
+    assert sub["plan"] == "plus"
+    assert sub["period_end"]
+
+    result_again = await reconcile_yookassa_payments(limit=1, fetch_payment=fake_get_payment)
+    assert result_again["checked"] == 1
+    assert result_again["activated"] == 0
 
 
 def main() -> None:
     check_keyboards()
     check_yookassa_payload()
     check_payment_db_flow()
+    asyncio.run(check_payment_reconcile_flow())
     print("phase8 ok")
 
 

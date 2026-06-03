@@ -9,6 +9,8 @@
 - карта env-переменных для выбора LLM-модели по тарифу.
 """
 
+from datetime import datetime
+
 # Поддерживаемые виды животных.
 # Ключи должны совпадать с текстом кнопок выбора вида питомца.
 SUPPORTED_PETS = {
@@ -29,7 +31,7 @@ SUBSCRIPTION_PLANS = {
         "price": 0,
     },
     "plus": {
-        "title": "Plus — 200 ₽/мес",
+        "title": "Plus — 200 ₽ / 30 дней",
         "quota_total": 10,  # 10 запросов triage в месяц
         "price": 200,
     },
@@ -54,7 +56,7 @@ SUBSCRIPTION_PLANS = {
 # Используется в handlers/подписки и keyboards.py.
 SUBSCRIPTION_BUTTONS = {
     "🆓 Free • первый месяц": "free",
-    "🔹 Plus • 200 ₽/мес": "plus",
+    "🔹 Plus • 200 ₽ / 30 дней": "plus",
     "🔺 Pro • 300 ₽/мес": "pro",
     "👑 VIP • 2500 ₽/мес": "vip",
 }
@@ -62,6 +64,16 @@ SUBSCRIPTION_BUTTONS = {
 
 # Invert labels mapping for display (emoji + price etc.)
 PLAN_LABEL_BY_CODE = {code: label for label, code in SUBSCRIPTION_BUTTONS.items()}
+
+
+def _format_period_end(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return str(value)
+    return dt.strftime("%d.%m.%Y")
 
 
 def build_subscription_text(sub: dict) -> str:
@@ -84,6 +96,13 @@ def build_subscription_text(sub: dict) -> str:
     lines.append("")
     lines.append(f"Текущий тариф: <b>{plan_label}</b>")
     lines.append(f"Использовано запросов: <b>{quota_used}</b> / <b>{quota_total}</b>")
+    period_end = _format_period_end(sub.get("period_end"))
+    if plan_code != "free":
+        if period_end:
+            lines.append(f"Действует до: <b>{period_end}</b>")
+            lines.append("После окончания тариф автоматически вернётся на Free, если Plus не продлить.")
+        else:
+            lines.append("Срок действия: <b>без даты окончания</b> (ручная админ-выдача).")
     lines.append("")
 
     if plan_code == "free":
@@ -95,6 +114,7 @@ def build_subscription_text(sub: dict) -> str:
         lines.append("• после 30 дней новые напоминания можно создавать только на платных тарифах.")
     elif plan_code == "plus":
         lines.append("Что даёт Plus:")
+        lines.append("• разовая оплата на <b>30 дней</b>, без автосписаний;")
         lines.append("• до <b>10 запросов по здоровью</b> в месяц;")
         lines.append("• усиленный интеллект: более развёрнутые разборы жалоб и аккуратная оценка срочности;")
         lines.append("• расширенные материалы по уходу и FAQ;")

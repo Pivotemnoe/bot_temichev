@@ -181,8 +181,8 @@ async def create_payment(
 async def create_plus_payment(*, user_id: int, telegram_id: int) -> dict[str, Any]:
     return await create_payment(
         amount_rub=_plus_price_rub(),
-        description="TemichevVet Plus — подписка на 1 месяц",
-        metadata={"telegram_id": int(telegram_id), "user_id": int(user_id), "plan_code": "plus"},
+        description="TemichevVet Plus — доступ на 30 дней",
+        metadata={"telegram_id": int(telegram_id), "user_id": int(user_id), "plan_code": "plus", "access_days": 30},
     )
 
 

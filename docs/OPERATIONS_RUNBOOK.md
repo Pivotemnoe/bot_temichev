@@ -132,6 +132,8 @@ docker compose logs -f
 - `metadata.user_id`;
 - `metadata.telegram_id`;
 - логи `validation_failed`.
+- админский отчёт `💰 Платежи`;
+- админскую сверку `🔄 Проверить оплаты` или команду `/reconcile_payments`.
 
 ### База повреждена или не открывается
 

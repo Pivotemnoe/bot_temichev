@@ -1014,7 +1014,7 @@ def get_subscription(user_id: int):
         row = cur.fetchone()
     if not row:
         return None
-    return {
+    sub = {
         "id": row[0],
         "plan": row[1],
         "quota_total": row[2],
@@ -1022,6 +1022,28 @@ def get_subscription(user_id: int):
         "period_start": row[4],
         "period_end": row[5],
     }
+    if _subscription_is_expired(sub):
+        set_subscription_plan(user_id, "free")
+        return get_subscription(user_id)
+    return sub
+
+
+def _subscription_is_expired(subscription: dict) -> bool:
+    plan = str(subscription.get("plan") or "free").lower()
+    if plan == "free":
+        return False
+
+    period_end = subscription.get("period_end")
+    if not period_end:
+        return False
+
+    try:
+        end_at = datetime.fromisoformat(str(period_end))
+    except ValueError:
+        return False
+    if end_at.tzinfo is None:
+        end_at = end_at.replace(tzinfo=timezone.utc)
+    return end_at <= datetime.now(timezone.utc)
 
 
 def _create_subscription(user_id: int, plan_code: str):
@@ -1066,12 +1088,13 @@ def ensure_default_subscription(user_id: int):
     return sub
 
 
-def set_subscription_plan(user_id: int, plan_code: str):
+def set_subscription_plan(user_id: int, plan_code: str, period_end: str | None = None):
     """
     Установить тариф (free/plus/pro/vip), сбросить счётчик quota_used.
     """
     now = _utc_now_iso()
     plan = SUBSCRIPTION_PLANS[plan_code]
+    normalized_period_end = None if plan_code == "free" else period_end
     with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.cursor()
         # проверяем, есть ли уже подписка
@@ -1085,19 +1108,19 @@ def set_subscription_plan(user_id: int, plan_code: str):
             cur.execute(
                 """
                 INSERT INTO subscriptions (user_id, plan, quota_total, quota_used, period_start, period_end)
-                VALUES (?, ?, ?, 0, ?, NULL)
+                VALUES (?, ?, ?, 0, ?, ?)
                 """,
-                (user_id, plan_code, plan["quota_total"], now),
+                (user_id, plan_code, plan["quota_total"], now, normalized_period_end),
             )
         else:
             # обновляем
             cur.execute(
                 """
                 UPDATE subscriptions
-                SET plan = ?, quota_total = ?, quota_used = 0, period_start = ?, period_end = NULL
+                SET plan = ?, quota_total = ?, quota_used = 0, period_start = ?, period_end = ?
                 WHERE user_id = ?
                 """,
-                (plan_code, plan["quota_total"], now, user_id),
+                (plan_code, plan["quota_total"], now, normalized_period_end, user_id),
             )
 
         # Обратная связь (feedback пользователей)
@@ -1117,8 +1140,11 @@ def set_subscription_plan(user_id: int, plan_code: str):
         conn.commit()
 
 
-def activate_plus(user_id: int) -> None:
-    set_subscription_plan(user_id, "plus")
+def activate_plus(user_id: int, days: int | None = 30) -> None:
+    period_end = None
+    if days is not None:
+        period_end = (datetime.now(timezone.utc) + timedelta(days=int(days))).isoformat()
+    set_subscription_plan(user_id, "plus", period_end=period_end)
 
 
 def _payment_row_to_dict(row) -> dict:
@@ -1261,6 +1287,90 @@ def get_last_payment(user_id: int, provider: str = "yookassa") -> dict | None:
         )
         row = cur.fetchone()
     return _payment_row_to_dict(row) if row else None
+
+
+def list_payment_records(
+    *,
+    provider: str | None = None,
+    date_from: str | datetime | None = None,
+    date_to: str | datetime | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    where: list[str] = []
+    params: list = []
+    if provider:
+        where.append("p.provider = ?")
+        params.append(provider)
+    if date_from is not None:
+        where.append("p.created_at >= ?")
+        params.append(_analytics_iso(date_from))
+    if date_to is not None:
+        where.append("p.created_at < ?")
+        params.append(_analytics_iso(date_to))
+
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    params.append(int(limit))
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT
+                p.id, p.user_id, p.provider, p.provider_payment_id, p.plan_code, p.amount_rub,
+                p.status, p.created_at, p.updated_at, p.paid_at, p.raw_payload,
+                u.telegram_id, u.name
+            FROM payments p
+            LEFT JOIN users u ON u.id = p.user_id
+            {where_sql}
+            ORDER BY p.id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+    result: list[dict] = []
+    for row in rows:
+        item = _payment_row_to_dict(row[:11])
+        item["telegram_id"] = row[11]
+        item["user_name"] = row[12]
+        result.append(item)
+    return result
+
+
+def payment_records_summary(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                COUNT(*),
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'validation_failed' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status IN ('pending', 'waiting_for_capture') THEN 1 ELSE 0 END),
+                SUM(
+                    CASE
+                        WHEN status NOT IN ('succeeded', 'validation_failed', 'pending', 'waiting_for_capture')
+                        THEN 1 ELSE 0
+                    END
+                ),
+                COALESCE(SUM(CASE WHEN status = 'succeeded' THEN amount_rub ELSE 0 END), 0)
+            FROM payments
+            WHERE created_at >= ?
+              AND created_at < ?
+            """,
+            (start, end),
+        )
+        row = cur.fetchone() or (0, 0, 0, 0, 0, 0)
+    return {
+        "created": int(row[0] or 0),
+        "succeeded": int(row[1] or 0),
+        "validation_failed": int(row[2] or 0),
+        "pending": int(row[3] or 0),
+        "other_failed": int(row[4] or 0),
+        "succeeded_amount_rub": int(row[5] or 0),
+    }
 
 
 def try_consume_quota(user_id: int, amount: int = 1):

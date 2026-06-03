@@ -27,10 +27,13 @@ from app.db import (
     get_admin_dashboard_stats,
     get_subscription,
     get_user_by_telegram_id,
+    list_payment_records,
     list_admin_audit_events,
     log_admin_audit_event,
+    payment_records_summary,
     set_subscription_plan,
 )
+from app.services.payment_reconcile import payment_status_label, reconcile_yookassa_payments
 
 
 router = Router(name="admin")
@@ -133,6 +136,10 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💳 Подписки", callback_data="admin:subscriptions:30"),
             ],
             [
+                InlineKeyboardButton(text="💰 Платежи", callback_data="admin:payments:30"),
+                InlineKeyboardButton(text="🔄 Проверить оплаты", callback_data="admin:payreconcile:10"),
+            ],
+            [
                 InlineKeyboardButton(text="🔁 Удержание", callback_data="admin:retention:30"),
                 InlineKeyboardButton(text="🧾 Расходы", callback_data="admin:costs:7"),
             ],
@@ -166,6 +173,12 @@ def _pct(value: int | float, total: int | float) -> str:
 
 def _fmt_float(value: float) -> str:
     return f"{float(value):.1f}".rstrip("0").rstrip(".")
+
+
+def _fmt_admin_date(value: str | None) -> str:
+    if not value:
+        return "—"
+    return str(value)[:19].replace("T", " ")
 
 
 EVENT_LABELS = {
@@ -319,6 +332,45 @@ def render_admin_subscriptions_report(label: str, date_from: str, date_to: str) 
         f"Клики оплаты: {counts.get('pay_clicked', 0)}",
         f"Успешные оплаты: {payments.get('count', 0)} / {_fmt_float(payments.get('amount_rub', 0))} ₽",
     ]
+    return "\n".join(lines)
+
+
+def render_admin_payments_report(label: str, date_from: str, date_to: str) -> str:
+    summary = payment_records_summary(date_from, date_to)
+    recent = list_payment_records(date_from=date_from, date_to=date_to, limit=10)
+
+    lines = [
+        f"<b>💰 Платежи — {html.escape(label)}</b>",
+        "",
+        f"Создано платежей: <b>{summary.get('created', 0)}</b>",
+        f"Оплачено и подтверждено: <b>{summary.get('succeeded', 0)}</b> / {summary.get('succeeded_amount_rub', 0)} ₽",
+        f"Ожидают оплаты: <b>{summary.get('pending', 0)}</b>",
+        f"Не прошли проверку: <b>{summary.get('validation_failed', 0)}</b>",
+        f"Отменены/ошибки/другое: <b>{summary.get('other_failed', 0)}</b>",
+        "",
+        "<b>Последние платежи:</b>",
+    ]
+
+    if not recent:
+        lines.append("Платежей за период нет.")
+        return "\n".join(lines)
+
+    for payment in recent:
+        created_at = _fmt_admin_date(payment.get("created_at"))
+        paid_at = _fmt_admin_date(payment.get("paid_at"))
+        status = payment_status_label(payment.get("status"))
+        telegram_id = payment.get("telegram_id") or "?"
+        user_name = html.escape(str(payment.get("user_name") or "без имени"))
+        provider_payment_id = html.escape(str(payment.get("provider_payment_id") or ""))
+        short_payment_id = provider_payment_id[:10] + "…" if len(provider_payment_id) > 10 else provider_payment_id
+        lines.append(
+            "• "
+            f"#{payment.get('id')} {created_at} — {status}; "
+            f"{payment.get('amount_rub', 0)} ₽; "
+            f"user_id={payment.get('user_id')} / tg={telegram_id} ({user_name}); "
+            f"оплачен: {paid_at}; "
+            f"YooKassa: {short_payment_id}"
+        )
     return "\n".join(lines)
 
 
@@ -481,6 +533,54 @@ def apply_manual_subscription_change(target_telegram_id: int, plan_code: str) ->
         "telegram_id": int(target_telegram_id),
         "old_plan": old_plan,
         "new_plan": current.get("plan") or plan_code,
+        "period_end": current.get("period_end"),
+    }
+
+
+def _parse_reconcile_limit(text: str | None, default: int = 10, max_limit: int = 50) -> int:
+    for part in (text or "").split():
+        if part.isdigit():
+            return max(1, min(int(part), max_limit))
+    return default
+
+
+def render_payment_reconcile_report(summary: dict) -> str:
+    lines = [
+        "<b>🔄 Reconcile платежей YooKassa</b>",
+        "",
+        f"Проверено: <b>{summary.get('checked', 0)}</b>",
+        f"Обновлено статусов: <b>{summary.get('updated', 0)}</b>",
+        f"Plus активирован: <b>{summary.get('activated', 0)}</b>",
+        f"Не прошли проверку: <b>{summary.get('validation_failed', 0)}</b>",
+        f"Ошибки запроса: <b>{summary.get('errors', 0)}</b>",
+        "",
+        "<b>Детали:</b>",
+    ]
+    rows = summary.get("rows") or []
+    if not rows:
+        lines.append("Платежей для проверки нет.")
+        return "\n".join(lines)
+
+    for row in rows[:20]:
+        payment_id = html.escape(str(row.get("provider_payment_id") or ""))
+        short_payment_id = payment_id[:10] + "…" if len(payment_id) > 10 else payment_id
+        old_status = payment_status_label(row.get("old_status"))
+        new_status = payment_status_label(row.get("new_status"))
+        result = html.escape(str(row.get("result") or "unknown"))
+        lines.append(
+            f"• {short_payment_id}: {old_status} → {new_status}; "
+            f"tg={row.get('telegram_id') or '?'}; {result}"
+        )
+    return "\n".join(lines)
+
+
+def _payment_reconcile_audit_details(summary: dict) -> dict:
+    return {
+        "checked": summary.get("checked", 0),
+        "updated": summary.get("updated", 0),
+        "activated": summary.get("activated", 0),
+        "validation_failed": summary.get("validation_failed", 0),
+        "errors": summary.get("errors", 0),
     }
 
 
@@ -612,6 +712,28 @@ async def admin_manual_plus(message: Message) -> None:
     )
 
 
+@router.message(Command("reconcile_payments"))
+@router.message(F.text.regexp(r"(?i)^(сверить оплаты|проверить оплаты)(?:\s+\d+)?$"))
+async def admin_reconcile_payments(message: Message) -> None:
+    telegram_id = message.from_user.id if message.from_user else None
+    if not _is_admin(telegram_id):
+        await _report_denied_admin_attempt(bot=message.bot, user=message.from_user, source="message:reconcile_payments")
+        await message.answer(ADMIN_DENIED_TEXT)
+        return
+
+    limit = _parse_reconcile_limit(message.text)
+    _log_admin_event(message.from_user, "payment_reconcile_started", target="yookassa", details={"limit": limit})
+    await message.answer(f"Проверяю последние {limit} платежей YooKassa...")
+    summary = await reconcile_yookassa_payments(limit=limit)
+    _log_admin_event(
+        message.from_user,
+        "payment_reconcile_finished",
+        target="yookassa",
+        details=_payment_reconcile_audit_details(summary),
+    )
+    await message.answer(render_payment_reconcile_report(summary), reply_markup=_admin_menu_kb())
+
+
 @router.callback_query(F.data.startswith("admin:"))
 async def admin_callbacks(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
@@ -637,6 +759,21 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
+    if report == "payreconcile":
+        limit = _parse_reconcile_limit(arg)
+        _log_admin_event(callback.from_user, "payment_reconcile_started", target="yookassa", details={"limit": limit})
+        await callback.answer("Проверяю последние платежи...")
+        summary = await reconcile_yookassa_payments(limit=limit)
+        _log_admin_event(
+            callback.from_user,
+            "payment_reconcile_finished",
+            target="yookassa",
+            details=_payment_reconcile_audit_details(summary),
+        )
+        if callback.message:
+            await callback.message.answer(render_payment_reconcile_report(summary), reply_markup=_admin_menu_kb())
+        return
+
     label, date_from, date_to = _period_bounds(arg)
 
     if report == "period":
@@ -645,6 +782,8 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         text = render_admin_funnel_report(label, date_from, date_to)
     elif report == "subscriptions":
         text = render_admin_subscriptions_report(label, date_from, date_to)
+    elif report == "payments":
+        text = render_admin_payments_report(label, date_from, date_to)
     elif report == "retention":
         text = render_admin_retention_report(label, date_from, date_to)
     elif report == "costs":

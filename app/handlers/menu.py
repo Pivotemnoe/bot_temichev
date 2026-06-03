@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.filters import StateFilter
@@ -44,20 +45,33 @@ from app.keyboards_knowledge import faq_menu_kb
 from app.services.subscription_resolver import maybe_show_subscription_offer, DECISION_SOFT
 from app.services.static_assets import send_static_photo
 from app.services.analytics import EVENT_PAYMENT_SUCCESS, EVENT_PAY_CLICKED, track_event
+from app.services.payment_reconcile import payment_access_note, payment_not_found_text, payment_status_label
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-PLUS_PLAN_DESCRIPTION = """🔹 <b>Plus — 200 ₽ / месяц</b>
+def _format_user_period_end(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).strftime("%d.%m.%Y")
+    except ValueError:
+        return str(value)[:10]
+
+
+PLUS_PLAN_DESCRIPTION = f"""🔹 <b>Plus — 200 ₽ / 30 дней</b>
 
 <b>Что входит:</b>
+• разовая оплата на <b>30 дней</b>, без автосписаний;
 • до <b>10 запросов по здоровью</b> в месяц;
 • усиленный разбор жалоб;
 • расширенная история по питомцам;
 • до <b>20 активных напоминаний</b>;
 • до <b>3 питомцев</b>.
+
+{payment_access_note()}
 
 Нажмите кнопку ниже, чтобы перейти к оплате."""
 
@@ -357,7 +371,9 @@ async def callback_pay_plus(callback: CallbackQuery):
         return
 
     await callback.message.answer(
-        "Платёж создан. Откройте оплату, затем вернитесь в бот и нажмите «Я оплатил».",
+        "Платёж создан.\n\n"
+        f"{payment_access_note()}\n\n"
+        "Откройте оплату, затем вернитесь в бот и нажмите «Я оплатил».",
         reply_markup=payment_created_kb(str(pay_url)),
     )
     await callback.answer()
@@ -368,7 +384,7 @@ async def show_all_tariffs(message: Message):
     await message.answer(
         "Тарифы:\n\n"
         "🆓 Free — базовый доступ.\n"
-        "🔹 Plus — 200 ₽/мес, расширенные лимиты и история.\n"
+        "🔹 Plus — 200 ₽ за 30 дней, расширенные лимиты и история, без автосписаний.\n"
         "🔺 Pro — в разработке.\n"
         "👑 VIP — в разработке.",
         reply_markup=subscription_kb(),
@@ -383,7 +399,7 @@ async def _check_last_payment(message: Message, telegram_id: int) -> None:
 
     last = get_last_payment(int(user["id"]), provider="yookassa")
     if not last:
-        await message.answer("Я не нашёл созданный платёж. Откройте Plus и создайте оплату.", reply_markup=subscription_kb())
+        await message.answer(payment_not_found_text(), reply_markup=subscription_kb())
         return
 
     payment_id = str(last["provider_payment_id"])
@@ -425,8 +441,8 @@ async def _check_last_payment(message: Message, telegram_id: int) -> None:
 
         paid_at = payment.get("captured_at") or payment.get("created_at")
         update_payment_status("yookassa", payment_id, "succeeded", paid_at=paid_at, raw_payload=payment)
-        activate_plus(int(user["id"]))
         if not was_succeeded:
+            activate_plus(int(user["id"]))
             track_event(
                 int(user["id"]),
                 EVENT_PAYMENT_SUCCESS,
@@ -438,7 +454,23 @@ async def _check_last_payment(message: Message, telegram_id: int) -> None:
                 },
             )
         sub = get_subscription(int(user["id"]))
-        await message.answer("Оплата подтверждена. Подписка Plus активирована.", reply_markup=subscription_kb())
+        if was_succeeded:
+            await message.answer(
+                "Этот платёж уже был подтверждён ранее. Повторная проверка не продлевает срок Plus.",
+                reply_markup=subscription_kb(),
+            )
+            await message.answer(build_subscription_text(sub), reply_markup=subscription_kb())
+            return
+
+        period_end = (sub or {}).get("period_end")
+        until_text = ""
+        if period_end:
+            until_text = f"\nДействует до: <b>{_format_user_period_end(period_end)}</b>."
+        await message.answer(
+            "Оплата подтверждена. Plus активирован на 30 дней."
+            f"{until_text}\nАвтосписаний нет.",
+            reply_markup=subscription_kb(),
+        )
         await message.answer(build_subscription_text(sub), reply_markup=subscription_kb())
         return
 
@@ -448,7 +480,12 @@ async def _check_last_payment(message: Message, telegram_id: int) -> None:
         return
 
     update_payment_status("yookassa", payment_id, status or "unknown", raw_payload=payment)
-    await message.answer(f"Статус платежа: {status or 'unknown'}. Если оплата не прошла, создайте новый платёж.", reply_markup=subscription_kb())
+    await message.answer(
+        f"Статус платежа: {payment_status_label(status)}.\n\n"
+        "Если оплата не прошла, создайте новый платёж. Если деньги списались, "
+        "напишите через «✉️ Обратная связь» и приложите время оплаты.",
+        reply_markup=subscription_kb(),
+    )
 
 
 @router.message(F.text == "✅ Я оплатил (проверить)")
