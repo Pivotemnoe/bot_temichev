@@ -120,6 +120,8 @@ def build_receipt(amount_rub: int, description: str) -> dict[str, Any] | None:
                 "quantity": "1.00",
                 "amount": {"value": _amount_value(amount_rub), "currency": "RUB"},
                 "vat_code": vat_code,
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
             }
         ],
     }

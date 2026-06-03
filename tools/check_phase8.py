@@ -222,6 +222,8 @@ def check_yookassa_payload() -> None:
 
     receipt = build_receipt(amount_rub=200, description="x")
     assert receipt["items"][0]["amount"]["value"] == "200.00"
+    assert receipt["items"][0]["payment_subject"] == "service"
+    assert receipt["items"][0]["payment_mode"] == "full_payment"
 
 
 def check_payment_db_flow() -> None:
