@@ -6,6 +6,7 @@ import asyncio
 import html
 import re
 import logging
+from datetime import date
 from typing import Dict, Optional
 
 from aiogram import Router, F
@@ -179,6 +180,93 @@ def _triage_start_payload(user: dict, pet_id: int) -> dict:
     }
 
 
+def _plural_ru(value: int, one: str, few: str, many: str) -> str:
+    value_abs = abs(int(value))
+    if 11 <= value_abs % 100 <= 14:
+        return many
+    if value_abs % 10 == 1:
+        return one
+    if 2 <= value_abs % 10 <= 4:
+        return few
+    return many
+
+
+def _pet_age_months_from_card(pet: Dict | None, today: date | None = None) -> int | None:
+    if not pet:
+        return None
+    birth_year = pet.get("birth_year")
+    if not birth_year:
+        return None
+    try:
+        year = int(birth_year)
+        month = int(pet.get("birth_month") or 1)
+        day = int(pet.get("birth_day") or 1)
+        birth_date = date(year, month, day)
+    except (TypeError, ValueError):
+        return None
+
+    current = today or date.today()
+    if birth_date > current:
+        return None
+
+    months = (current.year - birth_date.year) * 12 + (current.month - birth_date.month)
+    if current.day < birth_date.day:
+        months -= 1
+    return max(months, 0)
+
+
+def _age_display_from_months(months: int) -> str:
+    months = max(int(months), 0)
+    years = months // 12
+    rest_months = months % 12
+    if years <= 0:
+        return f"{months} {_plural_ru(months, 'месяц', 'месяца', 'месяцев')}"
+    year_text = f"{years} {_plural_ru(years, 'год', 'года', 'лет')}"
+    if rest_months and years < 2:
+        month_text = f"{rest_months} {_plural_ru(rest_months, 'месяц', 'месяца', 'месяцев')}"
+        return f"{year_text} {month_text}"
+    return year_text
+
+
+def _age_group_from_months(months: int) -> str:
+    if months < 12:
+        return "До 1 года (котёнок/щенок)"
+    if months <= 84:
+        return "1–7 лет (взрослый)"
+    return "Старше 7 лет (возрастной)"
+
+
+def _pet_age_context_from_card(pet: Dict | None, today: date | None = None) -> dict | None:
+    months = _pet_age_months_from_card(pet, today=today)
+    if months is None:
+        return None
+    age_display = _age_display_from_months(months)
+    age_group = _age_group_from_months(months)
+    return {
+        "age_info": f"{age_group}; из карточки питомца: {age_display}",
+        "age_display": age_display,
+        "age_group": age_group,
+    }
+
+
+async def _ask_duration_or_age_from_pet(message: Message, state: FSMContext, pet: Dict | None) -> None:
+    age_context = _pet_age_context_from_card(pet)
+    if age_context:
+        await state.update_data(
+            age_info=age_context["age_info"],
+            age_source="pet_card",
+        )
+        await message.answer(
+            f"Возраст взял из карточки питомца: {age_context['age_display']}.\n\n{TRIAGE_ASK_DURATION}",
+            reply_markup=duration_kb(),
+        )
+        await state.set_state(TriageStates.asking_duration)
+        return
+
+    await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
+    await state.set_state(TriageStates.asking_age)
+
+
 def _record_red_flag_triage(
     *,
     user: dict,
@@ -306,8 +394,7 @@ async def start_triage_flow(message: Message, state: FSMContext, telegram_id: in
         await state.update_data(pet_id=int(pet["id"]))
         track_event(user["id"], EVENT_TRIAGE_STARTED, _triage_start_payload(user, int(pet["id"])))
         await message.answer(TRIAGE_START_INTRO)
-        await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
-        await state.set_state(TriageStates.asking_age)
+        await _ask_duration_or_age_from_pet(message, state, pet)
         return
 
     labels = [_pet_label(p) for p in pets]
@@ -366,8 +453,7 @@ async def triage_choose_pet(message: Message, state: FSMContext):
     user = get_user_by_telegram_id(message.from_user.id)
     if user:
         track_event(user["id"], EVENT_TRIAGE_STARTED, _triage_start_payload(user, int(pet_id)))
-    await message.answer(TRIAGE_ASK_AGE, reply_markup=age_group_kb())
-    await state.set_state(TriageStates.asking_age)
+    await _ask_duration_or_age_from_pet(message, state, get_pet_by_id(int(pet_id)))
 
 
 @router.message(TriageStates.asking_age)
