@@ -20,8 +20,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.db import init_db, list_admin_audit_events, log_admin_audit_event  # noqa: E402
-from app.handlers.admin import render_admin_status_report  # noqa: E402
+from app.db import create_user, get_subscription, init_db, list_admin_audit_events, log_admin_audit_event  # noqa: E402
+from app.handlers.admin import (  # noqa: E402
+    _parse_manual_plus_command,
+    apply_manual_subscription_change,
+    render_admin_status_report,
+)
 from app.middlewares.rate_limit import RateLimitMiddleware, RULES  # noqa: E402
 
 
@@ -51,6 +55,31 @@ def check_admin_status_has_no_secrets() -> None:
     assert "Секреты" in report
 
 
+def check_manual_plus_change() -> None:
+    user_id = create_user(telegram_id=777001, name="Plus Test")
+    parsed = _parse_manual_plus_command("выдать плюс 777001 ручная выдача для теста")
+    assert parsed == ("plus", 777001, "ручная выдача для теста")
+    assert _parse_manual_plus_command("/grant_plus@TemichevVettest_bot 777001 paid invoice") == (
+        "plus",
+        777001,
+        "paid invoice",
+    )
+    assert _parse_manual_plus_command("снять плюс 777001") is None
+
+    grant_result = apply_manual_subscription_change(777001, "plus")
+    assert grant_result is not None
+    assert grant_result["user_id"] == user_id
+    assert grant_result["old_plan"] == "free"
+    assert grant_result["new_plan"] == "plus"
+    assert (get_subscription(user_id) or {}).get("plan") == "plus"
+
+    revoke_result = apply_manual_subscription_change(777001, "free")
+    assert revoke_result is not None
+    assert revoke_result["old_plan"] == "plus"
+    assert revoke_result["new_plan"] == "free"
+    assert (get_subscription(user_id) or {}).get("plan") == "free"
+
+
 def check_rate_limit() -> None:
     limiter = RateLimitMiddleware()
     rule = RULES["start"]
@@ -67,6 +96,7 @@ def check_rate_limit() -> None:
 def main() -> None:
     check_admin_audit()
     check_admin_status_has_no_secrets()
+    check_manual_plus_change()
     check_rate_limit()
     print("security runtime checks ok")
 

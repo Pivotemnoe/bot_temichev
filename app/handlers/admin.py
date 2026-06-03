@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import json
 import logging
 import os
 import time
@@ -21,7 +22,15 @@ from app.config import (
     YOOKASSA_SECRET_KEY,
     YOOKASSA_SHOP_ID,
 )
-from app.db import get_admin_dashboard_stats, list_admin_audit_events, log_admin_audit_event
+from app.db import (
+    ensure_default_subscription,
+    get_admin_dashboard_stats,
+    get_subscription,
+    get_user_by_telegram_id,
+    list_admin_audit_events,
+    log_admin_audit_event,
+    set_subscription_plan,
+)
 
 
 router = Router(name="admin")
@@ -30,6 +39,18 @@ logger = logging.getLogger(__name__)
 ADMIN_DENIED_TEXT = "Команда не распознана. Откройте меню кнопками ниже."
 _DENIED_ADMIN_NOTIFY_COOLDOWN_SEC = 300
 _denied_admin_notified_at: dict[int, float] = {}
+
+ADMIN_PLUS_HELP_TEXT = (
+    "<b>⭐ Ручное управление Plus</b>\n\n"
+    "Только для администраторов из ADMIN_IDS.\n\n"
+    "Формат команд:\n"
+    "<code>выдать плюс TELEGRAM_ID причина</code>\n"
+    "<code>снять плюс TELEGRAM_ID причина</code>\n\n"
+    "Примеры:\n"
+    "<code>выдать плюс 123456789 тестовая выдача после оплаты</code>\n"
+    "<code>снять плюс 123456789 возврат платежа</code>\n\n"
+    "Причина обязательна и попадёт в админ-аудит."
+)
 
 
 def _is_admin(telegram_id: int | None) -> bool:
@@ -120,6 +141,7 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🛡 Аудит", callback_data="admin:audit:30"),
                 InlineKeyboardButton(text="⚙️ Статус", callback_data="admin:status:now"),
             ],
+            [InlineKeyboardButton(text="⭐ Plus вручную", callback_data="admin:plushelp:now")],
             [InlineKeyboardButton(text="⬇️ Экспорт CSV", callback_data="admin:export:30")],
         ]
     )
@@ -360,8 +382,31 @@ def render_admin_audit_report(label: str, date_from: str, date_to: str) -> str:
         action = html.escape(str(event.get("action") or "unknown"))
         target = html.escape(str(event.get("target") or ""))
         suffix = f" → {target}" if target else ""
-        lines.append(f"• {created_at} — {telegram_id} ({username}): {action}{suffix}")
+        details_note = _admin_audit_details_note(event.get("details"))
+        lines.append(f"• {created_at} — {telegram_id} ({username}): {action}{suffix}{details_note}")
     return "\n".join(lines)
+
+
+def _admin_audit_details_note(details: str | None) -> str:
+    if not details:
+        return ""
+    try:
+        parsed = json.loads(details)
+    except Exception:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+
+    parts: list[str] = []
+    if parsed.get("old_plan") or parsed.get("new_plan"):
+        parts.append(f"{parsed.get('old_plan', '?')}→{parsed.get('new_plan', '?')}")
+    if parsed.get("reason"):
+        parts.append(f"причина: {parsed['reason']}")
+    if parsed.get("error"):
+        parts.append(f"ошибка: {parsed['error']}")
+    if not parts:
+        return ""
+    return " (" + html.escape("; ".join(str(part) for part in parts)) + ")"
 
 
 def render_admin_status_report() -> str:
@@ -382,6 +427,61 @@ def render_admin_status_report() -> str:
         "Секреты, токены и ключи здесь не показываются.",
     ]
     return "\n".join(lines)
+
+
+def _parse_manual_plus_command(text: str) -> tuple[str, int, str] | None:
+    raw = (text or "").strip()
+    low = raw.casefold()
+
+    plan_code: str | None = None
+    rest = ""
+    if low.startswith("выдать плюс"):
+        plan_code = "plus"
+        rest = raw[len("выдать плюс"):].strip()
+    elif low.startswith("снять плюс"):
+        plan_code = "free"
+        rest = raw[len("снять плюс"):].strip()
+    else:
+        parts = raw.split(maxsplit=1)
+        command = parts[0].casefold().split("@", 1)[0] if parts else ""
+        if command == "/grant_plus":
+            plan_code = "plus"
+        elif command == "/revoke_plus":
+            plan_code = "free"
+        if plan_code:
+            rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if not plan_code:
+        return None
+    parts = rest.split(maxsplit=1)
+    if not parts:
+        return None
+    try:
+        target_telegram_id = int(parts[0])
+    except ValueError:
+        return None
+    reason = parts[1].strip() if len(parts) > 1 else ""
+    if len(reason) < 3:
+        return None
+    return plan_code, target_telegram_id, reason
+
+
+def apply_manual_subscription_change(target_telegram_id: int, plan_code: str) -> dict | None:
+    if plan_code not in {"free", "plus"}:
+        raise ValueError("manual subscription change supports only free/plus")
+    user = get_user_by_telegram_id(int(target_telegram_id))
+    if not user:
+        return None
+    previous = ensure_default_subscription(int(user["id"])) or {}
+    old_plan = previous.get("plan") or "free"
+    set_subscription_plan(int(user["id"]), plan_code)
+    current = get_subscription(int(user["id"])) or {}
+    return {
+        "user_id": int(user["id"]),
+        "telegram_id": int(target_telegram_id),
+        "old_plan": old_plan,
+        "new_plan": current.get("plan") or plan_code,
+    }
 
 
 def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
@@ -467,6 +567,51 @@ async def admin_menu(message: Message) -> None:
     await message.answer("<b>Админ-панель TemichevVet</b>", reply_markup=_admin_menu_kb())
 
 
+@router.message(F.text.regexp(r"(?i)^(выдать плюс|снять плюс|/grant_plus(?:@\w+)?|/revoke_plus(?:@\w+)?)\b"))
+async def admin_manual_plus(message: Message) -> None:
+    telegram_id = message.from_user.id if message.from_user else None
+    if not _is_admin(telegram_id):
+        await _report_denied_admin_attempt(bot=message.bot, user=message.from_user, source="message:manual_plus")
+        await message.answer(ADMIN_DENIED_TEXT)
+        return
+
+    parsed = _parse_manual_plus_command(message.text or "")
+    if not parsed:
+        _log_admin_event(message.from_user, "manual_plus_invalid", target="command")
+        await message.answer(ADMIN_PLUS_HELP_TEXT, reply_markup=_admin_menu_kb())
+        return
+
+    plan_code, target_telegram_id, reason = parsed
+    result = apply_manual_subscription_change(target_telegram_id, plan_code)
+    if not result:
+        _log_admin_event(
+            message.from_user,
+            "manual_plus_failed",
+            target=str(target_telegram_id),
+            details={"plan_code": plan_code, "reason": reason, "error": "user_not_found"},
+        )
+        await message.answer(
+            "Пользователь не найден в базе. Он должен сначала нажать /start в боте.",
+            reply_markup=_admin_menu_kb(),
+        )
+        return
+
+    _log_admin_event(
+        message.from_user,
+        "manual_subscription_change",
+        target=str(target_telegram_id),
+        details={**result, "reason": reason},
+    )
+    action = "выдан" if plan_code == "plus" else "снят"
+    await message.answer(
+        f"Готово: Plus {action}.\n\n"
+        f"Telegram ID: <b>{target_telegram_id}</b>\n"
+        f"Тариф: <b>{html.escape(str(result['old_plan']))}</b> → <b>{html.escape(str(result['new_plan']))}</b>\n"
+        f"Причина: {html.escape(reason)}",
+        reply_markup=_admin_menu_kb(),
+    )
+
+
 @router.callback_query(F.data.startswith("admin:"))
 async def admin_callbacks(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
@@ -483,6 +628,12 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         text = render_admin_status_report()
         if callback.message:
             await callback.message.answer(text, reply_markup=_admin_menu_kb())
+        await callback.answer()
+        return
+
+    if report == "plushelp":
+        if callback.message:
+            await callback.message.answer(ADMIN_PLUS_HELP_TEXT, reply_markup=_admin_menu_kb())
         await callback.answer()
         return
 

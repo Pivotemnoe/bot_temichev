@@ -62,10 +62,26 @@ systemctl status temichevvet
 - сервисный файл systemd/supervisor;
 - текущую версию кода.
 
-Docker:
+Проверенный SQLite-бэкап:
+
+```bash
+make backup-db
+```
+
+Docker/архив данных при необходимости:
 
 ```bash
 tar -czf temichevvet_data_$(date +%Y%m%d_%H%M).tgz data/
+```
+
+Подробная инструкция: [Backup and restore](BACKUP_RESTORE.md).
+
+## 4.1. Проверка единственного процесса
+
+На VPS один `BOT_TOKEN` должен обслуживаться только одним процессом:
+
+```bash
+.venv/bin/python tools/check_single_bot_process.py
 ```
 
 ## 5. Обновление
@@ -126,10 +142,18 @@ docker compose logs -f
 - свободное место;
 - свежий бэкап.
 
+Восстановление выполнять только при остановленном боте:
+
+```bash
+systemctl stop temichevvet
+.venv/bin/python tools/restore_db.py backups/bot_YYYYMMDD_HHMMSS.db --yes
+systemctl start temichevvet
+```
+
 ## 7. Откат
 
 1. Остановить новую версию.
 2. Вернуть старую папку или предыдущий git commit.
-3. Вернуть бэкап базы, если база менялась.
+3. Вернуть бэкап базы через `tools/restore_db.py`, если база менялась.
 4. Запустить старый сервис.
 5. Проверить `/start`, карточку питомца и платежный экран.

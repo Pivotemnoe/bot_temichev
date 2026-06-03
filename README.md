@@ -76,6 +76,7 @@ docker compose up --build
 - [Architecture](docs/ARCHITECTURE.md) — схема модулей, потоков данных, платежей и админки.
 - [Testing](docs/TESTING.md) — локальные, Docker и Telegram-проверки.
 - [Operations runbook](docs/OPERATIONS_RUNBOOK.md) — запуск, рестарт, бэкап, инциденты, откат.
+- [Backup and restore](docs/BACKUP_RESTORE.md) — регулярный бэкап `bot.db`, восстановление и проверка одного процесса.
 - [GitHub workflow](docs/GITHUB_WORKFLOW.md) — ветки, PR, issues, доступы.
 - [VPS deployment](docs/DEPLOYMENT_VPS.md) — безопасный деплой рядом со старой версией.
 - [Release checklist](docs/RELEASE_CHECKLIST.md) — чеклист перед публикацией.
@@ -90,11 +91,13 @@ docker compose up --build
 ## Безопасность
 
 - Админ-панель открывается только Telegram ID из `ADMIN_IDS`.
+- Ручная выдача/снятие Plus доступна только админам из `ADMIN_IDS`, требует причину и пишет событие в `admin_audit_log`.
 - В `production` переменная `ADMIN_IDS` обязательна явно; `ADMIN_CHAT_ID` используется для уведомлений и обратной связи, а не как неявный доступ к админке.
 - Неавторизованные попытки открыть `админ` или нажать админ-кнопки логируются и отправляются в `ADMIN_CHAT_ID` с ограничением частоты уведомлений.
 - `.env`, токены бота, YooKassa-ключи, база и логи не должны попадать в git или прод-архив.
 - Plus выдаётся только после проверки платежа у YooKassa: статус `succeeded`, `paid=true`, валюта `RUB`, ожидаемая сумма и metadata текущего пользователя.
 - Перед PR и релизом запускать `make security-check`; он ищет токены и секреты в git-visible файлах без вывода секретов целиком.
+- Перед релизом запускать `make backup-db` и проверять, что на VPS запущен только один процесс бота.
 - Новые обработчики с `pet_id`, `reminder_id`, `payment_id` обязаны заново проверять владельца данных, а не доверять callback-кнопке.
 
 ## Структура проекта

@@ -7,3 +7,4 @@ bot.db
 errors.log
 *.log
 /data/
+/backups/
