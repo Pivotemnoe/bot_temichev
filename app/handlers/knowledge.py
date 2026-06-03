@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import re
 
@@ -198,6 +199,24 @@ COMPLEX_DISH_KEYWORDS = {
     "плов",
     "салат",
     "запеканка",
+    "харчо",
+    "щи",
+    "уха",
+    "солянка",
+    "окрошка",
+    "суп-пюре",
+    "пельмени",
+    "вареники",
+    "шаурма",
+    "пицца",
+    "лазанья",
+    "ризотто",
+    "каша",
+    "омлет",
+    "сырники",
+    "блины",
+    "оливье",
+    "винегрет",
 }
 
 DISH_INGREDIENT_ALIASES = {
@@ -264,6 +283,29 @@ def _dangerous_dish_hint(ingredient: str) -> str | None:
         if needle in value:
             return label
     return None
+
+
+def _dish_composition_prompt(dish_name: str, *, unknown_query: bool = False) -> str:
+    safe_name = html.escape((dish_name or "блюдо").strip()[:80])
+    if unknown_query:
+        intro = (
+            f"Я не нашёл «<b>{safe_name}</b>» как отдельный продукт в базе.\n\n"
+            "Если это готовое блюдо, я могу проверить его по составу."
+        )
+    else:
+        intro = (
+            f"Это готовое блюдо: <b>{safe_name}</b>.\n\n"
+            "Я не буду угадывать рецепт, потому что состав может сильно отличаться."
+        )
+
+    return (
+        f"{intro}\n\n"
+        "Напишите ингредиенты через запятую.\n"
+        "Пример: говядина, рис, томат, лук, чеснок, соль, специи.\n\n"
+        "Если это не блюдо, а отдельный продукт, значит его пока нет в базе. "
+        "Попробуйте другое название или близкий по смыслу продукт.\n\n"
+        "Чтобы выйти, нажмите «⬅️ В меню» или отправьте /cancel."
+    )
 
 
 def _format_complex_dish_result(dish_name: str, ingredients: list[str]) -> str:
@@ -456,9 +498,7 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
                 {"dish_name": dish_name, "status": "needs_composition", "ingredients_count": 0},
             )
             await message.answer(
-                f"Это готовое блюдо: <b>{dish_name}</b>.\n\n"
-                "Я не буду угадывать рецепт. Напишите состав через запятую: мясо, картофель, лук, соль, специи и т.д.\n"
-                "Если какого-то ингредиента нет, его не указывайте.",
+                _dish_composition_prompt(dish_name),
                 reply_markup=nutrition_menu_kb(),
             )
             return
@@ -480,9 +520,16 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
     )
 
     if not results:
+        unknown_dish_name = text.lower()[:80]
+        await state.update_data(food_dish_name=unknown_dish_name)
+        await state.set_state(KnowledgeStates.waiting_food_composition)
+        _track_food_event(
+            message,
+            EVENT_FOOD_COMPLEX_DISH,
+            {"dish_name": unknown_dish_name, "status": "needs_composition", "ingredients_count": 0},
+        )
         await message.answer(
-            "Я не нашёл такой продукт в базе.\n"
-            "Попробуйте другое написание или близкий по смыслу вариант.",
+            _dish_composition_prompt(unknown_dish_name, unknown_query=True),
             reply_markup=nutrition_menu_kb(),
         )
         return

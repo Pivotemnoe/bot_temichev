@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.config import ADMIN_CHAT_ID, FEEDBACK_CHAT_ID
 from app.db import (
@@ -23,6 +23,7 @@ from app.texts import (
     FEEDBACK_THANKS_TEXT,
     FEEDBACK_ADMIN_TEMPLATE,
 )
+from app.ux import BTN_MENU, is_cancel_text
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,13 @@ router = Router()
 class FeedbackStates(StatesGroup):
     """Состояния FSM для сценария обратной связи."""
     waiting_text = State()
+
+
+def feedback_exit_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=BTN_MENU)]],
+        resize_keyboard=True,
+    )
 
 
 def _get_user_plan_safe(telegram_id: int) -> str:
@@ -93,7 +101,7 @@ async def feedback_start(message: Message, state: FSMContext) -> None:
     Пользователь пишет один текст, мы сохраняем его в БД и отправляем в сервисный чат.
     """
     await state.set_state(FeedbackStates.waiting_text)
-    await message.answer(FEEDBACK_INTRO_TEXT)
+    await message.answer(FEEDBACK_INTRO_TEXT, reply_markup=feedback_exit_kb())
 
 
 @router.message(FeedbackStates.waiting_text)
@@ -102,9 +110,18 @@ async def feedback_handle_text(message: Message, state: FSMContext) -> None:
     Принимаем текст фидбэка, сохраняем его в таблицу feedback и отправляем в FEEDBACK_CHAT_ID.
     """
     text = (message.text or "").strip()
+    if is_cancel_text(text):
+        await state.clear()
+        await message.answer(
+            "Обратная связь отменена. Сообщение команде не отправлено.",
+            reply_markup=main_menu_kb(),
+        )
+        return
+
     if not text:
         await message.answer(
             "Сообщение пустое. Пожалуйста, опишите, что вы хотите сообщить.",
+            reply_markup=feedback_exit_kb(),
         )
         return
 

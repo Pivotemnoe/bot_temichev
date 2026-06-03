@@ -13,6 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.handlers.start import _faq_after_start_text, _welcome_kb  # noqa: E402
+from app.handlers.feedback import feedback_exit_kb  # noqa: E402
+from app.handlers.knowledge import _complex_dish_name, _dish_composition_prompt  # noqa: E402
 from app.keyboards import main_menu_kb, subscription_kb  # noqa: E402
 from app.keyboards_knowledge import care_menu_kb, faq_menu_kb, nutrition_menu_kb  # noqa: E402
 from app.keyboards_reminders import reminders_menu_kb  # noqa: E402
@@ -84,6 +86,7 @@ def main() -> int:
         "faq": _button_rows(faq_menu_kb()),
         "reminders": _button_rows(reminders_menu_kb()),
         "subscription": _button_rows(subscription_kb()),
+        "feedback_exit": _button_rows(feedback_exit_kb()),
     }
     texts = {
         "start_help": start_help,
@@ -95,6 +98,16 @@ def main() -> int:
 
     errors: list[str] = []
     errors.extend(_check_text("start_help", start_help, max_chars=MAX_START_TEXT_CHARS))
+    if "не связь с ветеринарным врачом" not in FEEDBACK_INTRO_TEXT:
+        errors.append("feedback_intro: must clearly say feedback is not a vet consultation")
+    if "Не пишите сюда симптомы" not in FEEDBACK_INTRO_TEXT:
+        errors.append("feedback_intro: must tell users not to send symptoms")
+    if "⬅️ В меню" not in {button for row in keyboards["feedback_exit"] for button in row}:
+        errors.append("feedback_exit: missing explicit menu exit button")
+    if _complex_dish_name("харчо") != "харчо":
+        errors.append("nutrition: harcho must be treated as a complex dish")
+    if "Напишите ингредиенты через запятую" not in _dish_composition_prompt("харчо"):
+        errors.append("nutrition: complex dish prompt must ask for ingredients")
     for name, rows in keyboards.items():
         errors.extend(_check_keyboard(name, rows))
 
@@ -104,6 +117,7 @@ def main() -> int:
         _render_text("Что дальше", texts["next_steps"])
         _render_text("Питание: поиск", texts["nutrition_search"])
         _render_text("Обратная связь", texts["feedback_intro"])
+        _render_keyboard("Обратная связь: выход", keyboards["feedback_exit"])
 
     if errors:
         print("\nMobile UX issues:")
