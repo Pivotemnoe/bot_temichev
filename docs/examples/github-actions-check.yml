@@ -1,0 +1,43 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: make check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      BOT_TOKEN: "123456:test"
+      OPENAI_API_KEY: "ci-dummy-openai-key"
+      ADMIN_CHAT_ID: "0"
+      ADMIN_IDS: "0"
+      DB_PATH: "/tmp/temichevvet-ci.db"
+      ENV: "development"
+      LOG_LEVEL: "INFO"
+      ERROR_LOG_PATH: "/tmp/temichevvet-errors.log"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run checks
+        run: make check

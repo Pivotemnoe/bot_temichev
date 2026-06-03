@@ -74,6 +74,9 @@ docker compose up --build
 
 - [Developer handoff](docs/DEVELOPER_HANDOFF.md) — что это за проект, где что лежит, как проверять изменения.
 - [Architecture](docs/ARCHITECTURE.md) — схема модулей, потоков данных, платежей и админки.
+- [Roadmap](docs/ROADMAP.md) — приоритеты P0/P1/P2/P3.
+- [Bot scenarios](docs/BOT_SCENARIOS.md) — пользовательские сценарии кнопка за кнопкой.
+- [DB schema](docs/DB_SCHEMA.md) — таблицы, поля и правила доступа к данным.
 - [Testing](docs/TESTING.md) — локальные, Docker и Telegram-проверки.
 - [Operations runbook](docs/OPERATIONS_RUNBOOK.md) — запуск, рестарт, бэкап, инциденты, откат.
 - [Backup and restore](docs/BACKUP_RESTORE.md) — регулярный бэкап `bot.db`, восстановление и проверка одного процесса.

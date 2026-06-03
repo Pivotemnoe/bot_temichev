@@ -5,7 +5,7 @@ from __future__ import annotations
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from app.db import get_user_by_telegram_id, delete_pet
+from app.db import get_pet_for_user, get_user_by_telegram_id, delete_pet
 from app.keyboards import main_menu_kb
 from app.ux import BTN_BACK, BTN_MENU
 
@@ -33,6 +33,11 @@ async def delete_pet_callback(callback: CallbackQuery):
         await callback.answer("Некорректный идентификатор питомца.", show_alert=True)
         return
 
+    user = get_user_by_telegram_id(callback.from_user.id)
+    if not user or not get_pet_for_user(int(user["id"]), pet_id):
+        await callback.answer("Питомец не найден", show_alert=True)
+        return
+
     await callback.message.answer(
         "⚠️ Вы уверены, что хотите удалить этого питомца?\n\n"
         "Это действие необратимо: будут удалены данные питомца, связанные напоминания и записи.",
@@ -54,12 +59,10 @@ async def delete_pet_confirm_callback(callback: CallbackQuery):
         await callback.answer()
         return
 
-    # БД: delete_pet проверяет user_id, поэтому опасности удалить чужого питомца нет.
-    try:
-        delete_pet(pet_id, user_id=user["id"])
-    except TypeError:
-        # на случай старой сигнатуры delete_pet(pet_id, user_id)
-        delete_pet(pet_id, user["id"])
+    if not delete_pet(int(user["id"]), pet_id):
+        await callback.message.answer("Питомец не найден.", reply_markup=main_menu_kb())
+        await callback.answer("Питомец не найден", show_alert=True)
+        return
 
     await callback.message.answer("✅ Питомец удалён.", reply_markup=main_menu_kb())
     await callback.answer("Удалено")

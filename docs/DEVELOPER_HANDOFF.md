@@ -27,6 +27,9 @@ TemichevVet - Telegram-бот для владельцев кошек и соба
 - `docs/THREAT_MODEL.md` - что защищаем и какие обходы нельзя допускать.
 - `docs/SECURITY_CHECKLIST.md` - security-проверки перед PR, релизом, VPS и инцидентами.
 - `docs/ARCHITECTURE.md` - архитектура модулей и потоков.
+- `docs/ROADMAP.md` - приоритеты дальнейшей разработки.
+- `docs/BOT_SCENARIOS.md` - все пользовательские сценарии кнопка за кнопкой.
+- `docs/DB_SCHEMA.md` - таблицы, поля и правила доступа к данным.
 - `docs/TESTING.md` - как проверять изменения.
 - `docs/OPERATIONS_RUNBOOK.md` - эксплуатация, бэкапы, откат.
 - `docs/GITHUB_WORKFLOW.md` - правила GitHub-работы.

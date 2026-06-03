@@ -67,20 +67,38 @@ make docker-config
 
 ## 5. CI
 
-GitHub Actions workflow пока не добавлен в репозиторий, потому что текущий token при первом push не имел `workflow` scope.
-
-Когда будет token с `workflow` scope, можно добавить workflow:
+CI-шаблон подготовлен в репозитории:
 
 ```text
-.github/workflows/ci.yml
+docs/examples/github-actions-check.yml
 ```
 
-Минимальные шаги CI:
+Когда GitHub-токен имеет `workflow` scope, этот шаблон можно включить как:
 
-- install dependencies;
-- `python -m compileall -q app tools main.py`;
-- `python tools/check_knowledge_json.py`;
-- опционально Docker build.
+```text
+.github/workflows/check.yml
+```
+
+Workflow запускается на:
+
+- push в `main`;
+- pull request в `main`.
+
+Основная команда:
+
+```bash
+make check
+```
+
+Workflow использует dummy-env без реальных секретов:
+
+- `BOT_TOKEN`: тестовое значение `123456:test`;
+- `OPENAI_API_KEY`: тестовое значение `ci-dummy-openai-key`;
+- `ADMIN_IDS`: `0`;
+- `ADMIN_CHAT_ID`: `0`;
+- `DB_PATH`: `/tmp/temichevvet-ci.db`.
+
+Если GitHub не принимает push с `.github/workflows/check.yml`, значит текущему GitHub-токену не хватает `workflow` scope. Нужно перелогиниться в GitHub CLI/Desktop с правом `workflow` и повторить push.
 
 ## 6. Доступы
 
@@ -108,4 +126,4 @@ GitHub Actions workflow пока не добавлен в репозиторий
 - включить 2FA для аккаунтов с write/admin доступом;
 - включить secret scanning, если тариф GitHub позволяет.
 
-Важно: GitHub Actions workflow сейчас не добавлен из-за отсутствия `workflow` scope у текущего токена. После обновления токена можно добавить CI, но production-секреты не должны попадать в workflow без отдельной необходимости.
+Важно: production-секреты не должны попадать в workflow без отдельной необходимости.
