@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -83,6 +84,62 @@ def check_keyboards() -> None:
     payment_kb = payment_created_kb("https://pay.test/link")
     assert {"pay:check", "sub:back"} <= _inline_callbacks(payment_kb)
     assert "https://pay.test/link" in _inline_urls(payment_kb)
+
+
+def check_old_payment_schema_migrates() -> None:
+    with sqlite3.connect(tmp.name) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                provider_payment_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO payments (
+                user_id, provider, provider_payment_id, status, created_at, updated_at
+            )
+            VALUES (1, 'yookassa', 'legacy_payment_1', 'pending', '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:00+00:00')
+            """
+        )
+        conn.commit()
+
+    init_db()
+    with sqlite3.connect(tmp.name) as conn:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(payments)")
+        columns = {row[1] for row in cur.fetchall()}
+
+    assert {
+        "plan_code",
+        "amount_rub",
+        "paid_at",
+        "raw_payload",
+    } <= columns
+
+    user_id = create_user(telegram_id=8801888, name="Phase8 Legacy Payment")
+    payment_id = create_payment_record(
+        user_id=user_id,
+        provider="yookassa",
+        provider_payment_id="legacy_payment_1",
+        plan_code="plus",
+        amount_rub=200,
+        status="pending",
+        raw_payload={"id": "legacy_payment_1", "status": "pending"},
+    )
+    assert payment_id > 0
+    last = get_last_payment(user_id, provider="yookassa")
+    assert last["provider_payment_id"] == "legacy_payment_1"
+    assert last["plan_code"] == "plus"
+    assert last["amount_rub"] == 200
 
 
 class _FakeMessage:
@@ -255,6 +312,7 @@ async def check_payment_reconcile_flow() -> None:
 
 def main() -> None:
     check_keyboards()
+    check_old_payment_schema_migrates()
     asyncio.run(check_extra_request_stub())
     asyncio.run(check_current_plan_click_does_not_reset_quota())
     asyncio.run(check_free_button_does_not_downgrade_paid_plan())

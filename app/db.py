@@ -115,6 +115,22 @@ def init_db():
             )
             """
         )
+        _ensure_column(cur, "payments", "user_id", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(cur, "payments", "provider", "TEXT NOT NULL DEFAULT 'unknown'")
+        _ensure_column(cur, "payments", "provider_payment_id", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(cur, "payments", "plan_code", "TEXT NOT NULL DEFAULT 'plus'")
+        _ensure_column(cur, "payments", "amount_rub", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(cur, "payments", "status", "TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(cur, "payments", "created_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(cur, "payments", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(cur, "payments", "paid_at", "TEXT")
+        _ensure_column(cur, "payments", "raw_payload", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider_payment_id
+            ON payments(provider, provider_payment_id)
+            """
+        )
         # Логи триажа
         cur.execute(
             """
@@ -1184,18 +1200,38 @@ def create_payment_record(
         cur = conn.cursor()
         cur.execute(
             """
+            UPDATE payments
+            SET user_id = ?, plan_code = ?, amount_rub = ?, status = ?,
+                updated_at = ?, raw_payload = ?
+            WHERE provider = ? AND provider_payment_id = ?
+            """,
+            (
+                int(user_id),
+                plan_code,
+                int(amount_rub),
+                status,
+                now,
+                payload_json,
+                provider,
+                provider_payment_id,
+            ),
+        )
+        if cur.rowcount:
+            cur.execute(
+                "SELECT id FROM payments WHERE provider = ? AND provider_payment_id = ? ORDER BY id DESC LIMIT 1",
+                (provider, provider_payment_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return int(row[0]) if row else 0
+
+        cur.execute(
+            """
             INSERT INTO payments (
                 user_id, provider, provider_payment_id, plan_code, amount_rub,
                 status, created_at, updated_at, paid_at, raw_payload
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-            ON CONFLICT(provider, provider_payment_id) DO UPDATE SET
-                user_id = excluded.user_id,
-                plan_code = excluded.plan_code,
-                amount_rub = excluded.amount_rub,
-                status = excluded.status,
-                updated_at = excluded.updated_at,
-                raw_payload = excluded.raw_payload
             """,
             (
                 int(user_id),
@@ -1209,16 +1245,9 @@ def create_payment_record(
                 payload_json,
             ),
         )
+        payment_id = int(cur.lastrowid or 0)
         conn.commit()
-        if cur.lastrowid:
-            return int(cur.lastrowid)
-
-        cur.execute(
-            "SELECT id FROM payments WHERE provider = ? AND provider_payment_id = ?",
-            (provider, provider_payment_id),
-        )
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
+        return payment_id
 
 
 def update_payment_status(
