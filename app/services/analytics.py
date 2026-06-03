@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 from urllib.parse import parse_qs
 
-from app.db import ensure_default_subscription, get_user_by_id, log_user_event
+from app.db import ensure_default_subscription, get_user_by_id, get_user_by_telegram_id, log_user_event
 from app.prompts.selector import select_prompt_mode
 
 
 logger = logging.getLogger(__name__)
 
 EVENT_APP_START = "app_start"
+EVENT_REGISTRATION_STARTED = "registration_started"
+EVENT_USER_REGISTERED = "user_registered"
 EVENT_TRIAGE_STARTED = "triage_started"
 EVENT_TRIAGE_COMPLETED = "triage_completed"
 EVENT_PAYWALL_SHOWN = "paywall_shown"
@@ -18,8 +20,14 @@ EVENT_PAYMENT_SUCCESS = "payment_success"
 EVENT_FOLLOWUP_SCHEDULED = "followup_scheduled"
 EVENT_FOLLOWUP_SENT = "followup_sent"
 EVENT_FOLLOWUP_ANSWERED = "followup_answered"
+EVENT_PET_CREATE_STARTED = "pet_create_started"
 EVENT_PET_CREATED = "pet_created"
 EVENT_PET_SET_MAIN = "pet_set_main"
+EVENT_FOOD_SEARCH_STARTED = "food_search_started"
+EVENT_FOOD_QUERY = "food_query"
+EVENT_FOOD_COMPLEX_DISH = "food_complex_dish"
+EVENT_FSM_CANCELLED = "fsm_cancelled"
+EVENT_FSM_INVALID_INPUT = "fsm_invalid_input"
 
 TRIAGE_EVENTS = {
     EVENT_TRIAGE_STARTED,
@@ -129,3 +137,61 @@ def track_event(user_id: int | None, event_type: str, payload: dict | None = Non
     except Exception as e:
         logger.warning("Failed to track analytics event %s for user_id=%s: %s", event_type, user_id, e)
         return False
+
+
+def track_event_by_telegram_id(
+    telegram_id: int | None,
+    event_type: str,
+    payload: dict | None = None,
+) -> bool:
+    """Best-effort analytics writer when only Telegram id is available."""
+    if not telegram_id:
+        return False
+    try:
+        user = get_user_by_telegram_id(int(telegram_id))
+    except Exception:
+        user = None
+    if not user:
+        return False
+    return track_event(int(user["id"]), event_type, payload)
+
+
+def _state_name(state: str | None) -> str:
+    value = str(state or "").strip()
+    return value or "none"
+
+
+def track_fsm_cancel(
+    telegram_id: int | None,
+    state: str | None,
+    *,
+    scenario: str | None = None,
+    reason: str | None = None,
+) -> bool:
+    return track_event_by_telegram_id(
+        telegram_id,
+        EVENT_FSM_CANCELLED,
+        {
+            "state": _state_name(state),
+            "scenario": scenario or _state_name(state).split(":", 1)[0],
+            "reason": reason or "user_cancel",
+        },
+    )
+
+
+def track_fsm_invalid_input(
+    telegram_id: int | None,
+    state: str | None,
+    *,
+    scenario: str | None = None,
+    reason: str | None = None,
+    text: str | None = None,
+) -> bool:
+    raw = (text or "").strip()
+    payload = {
+        "state": _state_name(state),
+        "scenario": scenario or _state_name(state).split(":", 1)[0],
+        "reason": reason or "invalid_input",
+        "text_len": len(raw),
+    }
+    return track_event_by_telegram_id(telegram_id, EVENT_FSM_INVALID_INPUT, payload)

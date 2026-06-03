@@ -51,7 +51,15 @@ from app.db import (
     set_subscription_plan,
     get_subscription,
 )
-from app.constants import SUBSCRIPTION_BUTTONS, SUBSCRIPTION_PLANS, build_subscription_text
+from app.constants import SUBSCRIPTION_BUTTONS, build_subscription_text
+from app.services.analytics import (
+    EVENT_FOOD_COMPLEX_DISH,
+    EVENT_FOOD_QUERY,
+    EVENT_FOOD_SEARCH_STARTED,
+    track_event_by_telegram_id,
+    track_fsm_cancel,
+    track_fsm_invalid_input,
+)
 from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 router = Router()
@@ -129,70 +137,9 @@ def _get_user_plan(message: Message) -> str | None:
     return str(plan)
 
 
-    plan_meta = SUBSCRIPTION_PLANS.get(plan_code, SUBSCRIPTION_PLANS["free"])
-    # plan_meta['title'] используем только как резерв — текст ниже даёт понятные расшифровки
-
-    lines: list[str] = []
-    lines.append("💳 Ваша подписка")
-    lines.append("")
-
-    if plan_code == "free":
-        lines.append("Текущий тариф: <b>Free</b> — бесплатно")
-        lines.append("")
-        lines.append("Как работает Free:")
-        lines.append("• до <b>5 запросов по здоровью</b> питомцев в первый месяц;")
-        lines.append("• базовый интеллект: простая логика и короткие понятные рекомендации в типичных ситуациях;")
-        lines.append("• доступ к разделам «Можно / нельзя», «Уход и привычки» и FAQ;")
-        lines.append("• до <b>10 активных напоминаний</b> в течение первых 30 дней после регистрации;")
-        lines.append("• после 30 дней новые напоминания можно создавать только на платных тарифах.")
-    elif plan_code == "plus":
-        lines.append("Текущий тариф: <b>Plus</b> — 200 ₽ / 30 дней")
-        lines.append("")
-        lines.append("Что даёт Plus:")
-        lines.append("• разовая оплата на <b>30 дней</b>, без автосписаний;")
-        lines.append("• до <b>10 запросов по здоровью</b> в месяц;")
-        lines.append("• усиленный интеллект: более развёрнутые разборы жалоб и аккуратная оценка срочности;")
-        lines.append("• расширенные материалы по уходу и FAQ;")
-        lines.append("• до <b>20 активных напоминаний</b> по питомцам.")
-    elif plan_code == "pro":
-        lines.append("Текущий тариф: <b>Pro</b> — 400 ₽/мес")
-        lines.append("")
-        lines.append("Что даёт Pro:")
-        lines.append("• до <b>30 запросов по здоровью</b> в месяц;")
-        lines.append(
-            "• ещё более мощный интеллект: глубокие разборы сложных случаев, "
-            "подробные пояснения по рискам и типичным ошибкам ухода;"
-        )
-        lines.append("• практически безлимитные напоминания (лимит высокий, в обычной жизни его не достичь).")
-    elif plan_code == "vip":
-        lines.append("Текущий тариф: <b>VIP</b>")
-        lines.append("")
-        lines.append("Что даёт VIP:")
-        lines.append("• максимум запросов по здоровью и напоминаний;")
-        lines.append("• самый мощный интеллект: максимально подробные, индивидуальные подсказки по жалобам;")
-        lines.append("• онлайн-консультация доктора Темичева Константина Валерьевича (по предварительному согласованию времени);")
-        lines.append("• приоритетное развитие новых функций сначала на этом тарифе.")
-    else:
-        lines.append(f"Текущий тариф: <b>{plan_meta['title']}</b>")
-
-    lines.append("")
-    lines.append("Статистика текущего периода:")
-    lines.append(f"• доступно запросов по здоровью: <b>{quota_total}</b>")
-    lines.append(f"• использовано: <b>{quota_used}</b>")
-
-    lines.append("")
-    lines.append(
-        "Чем выше тариф, тем сложнее алгоритмы, которые анализируют жалобы, "
-        "и тем более развёрнутыми и аккуратными будут ответы бота."
-    )
-
-    lines.append("")
-    lines.append(
-        "Выберите тариф ниже, если хотите изменить условия доступа.\n"
-        "Платные тарифы подключаются через безопасную ссылку YooKassa."
-    )
-
-    return "\n".join(lines)
+def _track_food_event(message: Message, event_type: str, payload: dict | None = None) -> bool:
+    telegram_id = message.from_user.id if message.from_user else None
+    return track_event_by_telegram_id(telegram_id, event_type, payload)
 
 
 def _format_food_item(item: dict) -> str:
@@ -437,6 +384,7 @@ async def nutrition_start_search(message: Message, state: FSMContext) -> None:
     Точка входа в поиск по продуктам.
     Все три кнопки ведут в один сценарий: пользователь вводит название продукта.
     """
+    _track_food_event(message, EVENT_FOOD_SEARCH_STARTED, {"source": message.text or "nutrition_menu"})
     await state.set_state(KnowledgeStates.waiting_food_query)
     await message.answer(
         NUTRITION_SEARCH_PROMPT,
@@ -474,6 +422,7 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
 
     # Универсальный выход
     if is_cancel_text(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="food_search")
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,
@@ -482,6 +431,13 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     if not text:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="food_search",
+            reason="empty_food_query",
+            text=text,
+        )
         await message.answer(
             NUTRITION_EMPTY_QUERY,
             reply_markup=nutrition_menu_kb(),
@@ -494,6 +450,11 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
         if not ingredients:
             await state.update_data(food_dish_name=dish_name)
             await state.set_state(KnowledgeStates.waiting_food_composition)
+            _track_food_event(
+                message,
+                EVENT_FOOD_COMPLEX_DISH,
+                {"dish_name": dish_name, "status": "needs_composition", "ingredients_count": 0},
+            )
             await message.answer(
                 f"Это готовое блюдо: <b>{dish_name}</b>.\n\n"
                 "Я не буду угадывать рецепт. Напишите состав через запятую: мясо, картофель, лук, соль, специи и т.д.\n"
@@ -501,12 +462,22 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
                 reply_markup=nutrition_menu_kb(),
             )
             return
+        _track_food_event(
+            message,
+            EVENT_FOOD_COMPLEX_DISH,
+            {"dish_name": dish_name, "status": "checked", "ingredients_count": len(ingredients)},
+        )
         await message.answer(_format_complex_dish_result(dish_name, ingredients), reply_markup=nutrition_menu_kb())
         await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb())
         return
 
     # Питание доступно всем тарифам — фильтрацию по plan не применяем.
     results = find_food(text, limit=3)
+    _track_food_event(
+        message,
+        EVENT_FOOD_QUERY,
+        {"query": text.lower()[:80], "results_count": len(results), "status": "found" if results else "not_found"},
+    )
 
     if not results:
         await message.answer(
@@ -531,6 +502,7 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
 async def nutrition_handle_complex_dish_composition(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if is_cancel_text(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="food_search")
         await state.clear()
         await message.answer(BACK_TO_MAIN_MENU_TEXT, reply_markup=main_menu_kb())
         return
@@ -539,12 +511,24 @@ async def nutrition_handle_complex_dish_composition(message: Message, state: FSM
     dish_name = str(data.get("food_dish_name") or "блюдо")
     ingredients = _extract_ingredients_from_text(text, dish_name=None)
     if not ingredients:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="food_search",
+            reason="empty_dish_composition",
+            text=text,
+        )
         await message.answer(
             "Напишите состав через запятую. Например: говядина, картофель, морковь, лук, соль.",
             reply_markup=nutrition_menu_kb(),
         )
         return
 
+    _track_food_event(
+        message,
+        EVENT_FOOD_COMPLEX_DISH,
+        {"dish_name": dish_name, "status": "checked", "ingredients_count": len(ingredients)},
+    )
     await message.answer(_format_complex_dish_result(dish_name, ingredients), reply_markup=nutrition_menu_kb())
     await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb())
     await state.set_state(KnowledgeStates.waiting_food_query)
@@ -646,6 +630,7 @@ async def care_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     if is_cancel_text(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="care_search")
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,
@@ -654,6 +639,13 @@ async def care_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     if not text:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="care_search",
+            reason="empty_care_query",
+            text=text,
+        )
         await message.answer(
             CARE_EMPTY_QUERY,
             reply_markup=care_menu_kb(),
@@ -791,6 +783,7 @@ async def faq_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     if is_cancel_text(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="faq_search")
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,
@@ -799,6 +792,13 @@ async def faq_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     if not text:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="faq_search",
+            reason="empty_faq_query",
+            text=text,
+        )
         await message.answer(
             "Пожалуйста, напишите, что вас интересует.",
             reply_markup=faq_menu_kb(),

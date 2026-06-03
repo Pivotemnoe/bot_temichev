@@ -30,8 +30,12 @@ from app.constants import SUPPORTED_PETS
 from app.services.analytics import (
     EVENT_APP_START,
     EVENT_PET_CREATED,
+    EVENT_REGISTRATION_STARTED,
+    EVENT_USER_REGISTERED,
     parse_start_payload,
     track_event,
+    track_fsm_cancel,
+    track_fsm_invalid_input,
 )
 from app.services.clinic import get_clinic_profile, render_clinic_start_note
 from app.ux import BTN_MENU, is_cancel_text
@@ -296,6 +300,7 @@ async def reg_get_name(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     low = text.lower()
     if is_cancel_text(text) or low == "📋 открыть главное меню":
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="registration")
         await message.answer("Ок.", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -306,6 +311,21 @@ async def reg_get_name(message: Message, state: FSMContext):
         return
 
     await state.update_data(name=name)
+    data = await state.get_data()
+    start_payload = data.get("start_payload") or parse_start_payload("")
+    tg_id = message.from_user.id
+    user = get_user_by_telegram_id(tg_id)
+    if user is None:
+        user_id = create_user(tg_id, name, clinic_id=start_payload.get("clinic_id"))
+        track_event(user_id, EVENT_APP_START, start_payload)
+        track_event(user_id, EVENT_REGISTRATION_STARTED, {"source": "welcome"})
+        track_event(user_id, EVENT_USER_REGISTERED, {"source": "welcome"})
+    else:
+        user_id = int(user["id"])
+        if start_payload.get("clinic_id") is not None:
+            set_user_clinic_id_if_empty(user_id, start_payload.get("clinic_id"))
+        track_event(user_id, EVENT_REGISTRATION_STARTED, {"source": "welcome_existing"})
+    await state.update_data(user_id=user_id)
     await message.answer(
         f"Спасибо, {name}!\nТеперь скажите, какое у вас животное:",
         reply_markup=pet_type_kb(),
@@ -324,6 +344,7 @@ async def reg_pet_type(message: Message, state: FSMContext):
     text = (message.text or "").strip()
 
     if is_cancel_text(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="registration")
         await message.answer(
             "Регистрация прервана. Вы можете начать сначала командой /start.",
             reply_markup=main_menu_kb(),
@@ -332,6 +353,13 @@ async def reg_pet_type(message: Message, state: FSMContext):
         return
 
     if text not in SUPPORTED_PETS:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="registration",
+            reason="unsupported_pet_type",
+            text=text,
+        )
         await message.answer(
             "Сейчас бот работает только с кошками и собаками.\n"
             "Пожалуйста, выберите вариант:\n"
@@ -363,6 +391,7 @@ async def reg_pet_name(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     low = text.lower()
     if is_cancel_text(text) or low == "📋 открыть главное меню":
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="registration")
         await message.answer("Ок.", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -377,16 +406,15 @@ async def reg_pet_name(message: Message, state: FSMContext):
 
     tg_id = message.from_user.id
     user = get_user_by_telegram_id(tg_id)
-    is_new_user = user is None
+    user_id = int(data.get("user_id") or (user or {}).get("id") or 0)
     if user is None:
         user_id = create_user(tg_id, name, clinic_id=start_payload.get("clinic_id"))
+        track_event(user_id, EVENT_APP_START, start_payload)
+        track_event(user_id, EVENT_USER_REGISTERED, {"source": "registration_fallback"})
     else:
-        user_id = user["id"]
+        user_id = int(user["id"])
         if start_payload.get("clinic_id") is not None:
             set_user_clinic_id_if_empty(user_id, start_payload.get("clinic_id"))
-
-    if is_new_user:
-        track_event(user_id, EVENT_APP_START, start_payload)
 
     pet_id = create_pet(user_id, pet_type, pet_name)
     track_event(

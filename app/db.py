@@ -2480,6 +2480,9 @@ def counts_bundle(date_from: str | datetime, date_to: str | datetime) -> dict:
     end = _analytics_iso(date_to)
     event_types = (
         "app_start",
+        "registration_started",
+        "user_registered",
+        "pet_create_started",
         "triage_started",
         "triage_completed",
         "paywall_shown",
@@ -2490,6 +2493,11 @@ def counts_bundle(date_from: str | datetime, date_to: str | datetime) -> dict:
         "followup_answered",
         "pet_created",
         "pet_set_main",
+        "food_search_started",
+        "food_query",
+        "food_complex_dish",
+        "fsm_cancelled",
+        "fsm_invalid_input",
     )
     counts = {event_type: count_events(event_type, start, end) for event_type in event_types}
 
@@ -2514,12 +2522,282 @@ def funnel(date_from: str | datetime, date_to: str | datetime) -> dict:
     counts = counts_bundle(date_from, date_to)
     keys = (
         "app_start",
+        "registration_started",
+        "user_registered",
+        "pet_created",
         "triage_completed",
         "paywall_shown",
         "pay_clicked",
         "payment_success",
     )
     return {key: int(counts.get(key, 0) or 0) for key in keys}
+
+
+def conversion_funnel(date_from: str | datetime, date_to: str | datetime) -> dict:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    keys = (
+        "app_start",
+        "registration_started",
+        "user_registered",
+        "pet_created",
+        "triage_completed",
+        "paywall_shown",
+        "pay_clicked",
+        "payment_success",
+    )
+    placeholders = ",".join("?" for _ in keys)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT event_type, COUNT(DISTINCT user_id)
+            FROM user_events
+            WHERE event_type IN ({placeholders})
+              AND created_at >= ?
+              AND created_at < ?
+            GROUP BY event_type
+            """,
+            (*keys, start, end),
+        )
+        rows = cur.fetchall()
+    result = {key: 0 for key in keys}
+    for event_type, cnt in rows:
+        result[str(event_type)] = int(cnt or 0)
+    return result
+
+
+COMPLAINT_TOPIC_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("рвота", ("рвот", "тошнит", "тошнота", "срыг")),
+    ("понос / диарея", ("понос", "диаре", "жидкий стул", "стул жид")),
+    ("отказ от еды", ("не ест", "отказ от еды", "аппетит", "не куш")),
+    ("вялость", ("вял", "сонлив", "лежит", "слаб")),
+    ("кашель / чихание", ("каш", "чих", "сопл", "насморк")),
+    ("зуд / кожа", ("зуд", "чеш", "кожа", "шерст", "лысе")),
+    ("хромота / боль", ("хром", "лап", "боль", "болит", "травм")),
+    ("мочеиспускание", ("моч", "писа", "лоток", "цистит")),
+    ("глаза", ("глаз", "слез", "конъюнктив")),
+    ("уши", ("ухо", "уши", "трясет головой", "трясёт головой")),
+    ("отравление", ("отрав", "съел", "съела", "проглот", "яд")),
+    ("судороги", ("судорог", "приступ", "трясе", "пена")),
+    ("кровь / кровотечение", ("кров", "кровотеч")),
+)
+
+
+def _normalize_analytics_text(value: str | None, limit: int = 120) -> str:
+    text = " ".join(str(value or "").lower().split())
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _complaint_topic(complaint_text: str | None) -> str:
+    text = _normalize_analytics_text(complaint_text, limit=1000)
+    for topic, needles in COMPLAINT_TOPIC_KEYWORDS:
+        if any(needle in text for needle in needles):
+            return topic
+    return "другое"
+
+
+def top_triage_complaints(date_from: str | datetime, date_to: str | datetime, limit: int = 10) -> list[dict]:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT complaint_text, COALESCE(NULLIF(LOWER(urgency_level), ''), 'unknown'), created_at
+            FROM triage_logs
+            WHERE created_at >= ?
+              AND created_at < ?
+            ORDER BY created_at DESC
+            """,
+            (start, end),
+        )
+        rows = cur.fetchall()
+
+    grouped: dict[str, dict] = {}
+    for complaint_text, urgency_level, created_at in rows:
+        topic = _complaint_topic(complaint_text)
+        item = grouped.setdefault(
+            topic,
+            {
+                "topic": topic,
+                "count": 0,
+                "red": 0,
+                "yellow": 0,
+                "green": 0,
+                "unknown": 0,
+                "last_at": created_at,
+                "examples": [],
+            },
+        )
+        item["count"] += 1
+        urgency_key = str(urgency_level or "unknown")
+        if urgency_key not in {"red", "yellow", "green"}:
+            urgency_key = "unknown"
+        item[urgency_key] += 1
+        if not item.get("last_at") or str(created_at or "") > str(item["last_at"]):
+            item["last_at"] = created_at
+        example = _normalize_analytics_text(complaint_text, limit=90)
+        if example and example not in item["examples"] and len(item["examples"]) < 3:
+            item["examples"].append(example)
+
+    return sorted(grouped.values(), key=lambda x: (-int(x["count"]), str(x["topic"])))[: int(limit)]
+
+
+def top_food_queries(date_from: str | datetime, date_to: str | datetime, limit: int = 10) -> list[dict]:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT event_type, payload, created_at
+            FROM user_events
+            WHERE event_type IN ('food_query', 'food_complex_dish')
+              AND created_at >= ?
+              AND created_at < ?
+            ORDER BY created_at DESC
+            """,
+            (start, end),
+        )
+        rows = cur.fetchall()
+
+    grouped: dict[tuple[str, str], dict] = {}
+    for event_type, payload_json, created_at in rows:
+        try:
+            payload = json.loads(payload_json or "{}")
+        except Exception:
+            payload = {}
+        if event_type == "food_complex_dish":
+            key = _normalize_analytics_text(payload.get("dish_name"), limit=80)
+            kind = "готовое блюдо"
+        else:
+            key = _normalize_analytics_text(payload.get("query"), limit=80)
+            kind = "продукт"
+        if not key:
+            key = "не указано"
+        item = grouped.setdefault(
+            (kind, key),
+            {
+                "kind": kind,
+                "query": key,
+                "count": 0,
+                "found": 0,
+                "not_found": 0,
+                "needs_composition": 0,
+                "last_at": created_at,
+            },
+        )
+        item["count"] += 1
+        status = str(payload.get("status") or "")
+        if status == "not_found":
+            item["not_found"] += 1
+        elif status == "needs_composition":
+            item["needs_composition"] += 1
+        else:
+            item["found"] += 1
+        if not item.get("last_at") or str(created_at or "") > str(item["last_at"]):
+            item["last_at"] = created_at
+
+    return sorted(grouped.values(), key=lambda x: (-int(x["count"]), str(x["query"])))[: int(limit)]
+
+
+def _count_distinct_users_for_events(
+    cur: sqlite3.Cursor,
+    events: tuple[str, ...],
+    date_from: str,
+    date_to: str,
+) -> int:
+    placeholders = ",".join("?" for _ in events)
+    cur.execute(
+        f"""
+        SELECT COUNT(DISTINCT user_id)
+        FROM user_events
+        WHERE event_type IN ({placeholders})
+          AND created_at >= ?
+          AND created_at < ?
+        """,
+        (*events, date_from, date_to),
+    )
+    row = cur.fetchone() or (0,)
+    return int(row[0] or 0)
+
+
+def scenario_dropoffs(date_from: str | datetime, date_to: str | datetime) -> list[dict]:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    scenarios = (
+        ("registration", ("registration_started",), ("user_registered",)),
+        ("pet_create", ("pet_create_started",), ("pet_created",)),
+        ("triage", ("triage_started",), ("triage_completed",)),
+        ("food_search", ("food_search_started",), ("food_query", "food_complex_dish")),
+        ("plus_payment", ("paywall_shown",), ("payment_success",)),
+    )
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        result: list[dict] = []
+        for scenario, started_events, completed_events in scenarios:
+            started = _count_distinct_users_for_events(cur, started_events, start, end)
+            completed = _count_distinct_users_for_events(cur, completed_events, start, end)
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM user_events
+                WHERE event_type = 'fsm_cancelled'
+                  AND COALESCE(NULLIF(json_extract(payload, '$.scenario'), ''), 'unknown') = ?
+                  AND created_at >= ?
+                  AND created_at < ?
+                """,
+                (scenario, start, end),
+            )
+            cancelled = int((cur.fetchone() or (0,))[0] or 0)
+            result.append(
+                {
+                    "scenario": scenario,
+                    "started": started,
+                    "completed": completed,
+                    "abandoned": max(started - completed, 0),
+                    "cancelled": cancelled,
+                    "completion_rate": (completed / started) if started else 0.0,
+                }
+            )
+    return result
+
+
+def fsm_errors_summary(date_from: str | datetime, date_to: str | datetime, limit: int = 10) -> list[dict]:
+    start = _analytics_iso(date_from)
+    end = _analytics_iso(date_to)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                COALESCE(NULLIF(json_extract(payload, '$.scenario'), ''), 'unknown') AS scenario,
+                COALESCE(NULLIF(json_extract(payload, '$.state'), ''), 'unknown') AS state,
+                COALESCE(NULLIF(json_extract(payload, '$.reason'), ''), 'invalid_input') AS reason,
+                COUNT(*) AS cnt
+            FROM user_events
+            WHERE event_type = 'fsm_invalid_input'
+              AND created_at >= ?
+              AND created_at < ?
+            GROUP BY scenario, state, reason
+            ORDER BY cnt DESC, scenario, state, reason
+            LIMIT ?
+            """,
+            (start, end, int(limit)),
+        )
+        rows = cur.fetchall()
+    return [
+        {
+            "scenario": str(row[0] or "unknown"),
+            "state": str(row[1] or "unknown"),
+            "reason": str(row[2] or "invalid_input"),
+            "count": int(row[3] or 0),
+        }
+        for row in rows
+    ]
 
 
 def retention_d1_d7(date_from: str | datetime, date_to: str | datetime) -> dict:
@@ -2788,6 +3066,11 @@ def get_admin_dashboard_stats(date_from: str | datetime, date_to: str | datetime
         "period": {"from": start, "to": end},
         "counts": counts_bundle(start, end),
         "funnel": funnel(start, end),
+        "conversion_funnel": conversion_funnel(start, end),
+        "complaints": top_triage_complaints(start, end, limit=10),
+        "food_queries": top_food_queries(start, end, limit=10),
+        "dropoffs": scenario_dropoffs(start, end),
+        "fsm_errors": fsm_errors_summary(start, end, limit=10),
         "retention": retention_d1_d7(start, end),
         "sources": {
             "utm_source": top_sources(start, end, group_by="utm_source", limit=10),

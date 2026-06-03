@@ -56,6 +56,8 @@ from app.services.analytics import (
     EVENT_TRIAGE_STARTED,
     prompt_mode_for_context,
     track_event,
+    track_fsm_cancel,
+    track_fsm_invalid_input,
 )
 from app.ux import WHAT_NEXT_TEXT, is_cancel_text
 
@@ -340,6 +342,7 @@ async def triage_choose_pet(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/triage.py:triage_choose_pet user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     if _is_cancel(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="triage")
         await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -349,6 +352,13 @@ async def triage_choose_pet(message: Message, state: FSMContext):
     pet_id = mapping.get(text)
 
     if not pet_id:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="triage",
+            reason="unknown_pet_choice",
+            text=text,
+        )
         await message.answer(TRIAGE_CHOOSE_PET_FAIL)
         return
 
@@ -370,6 +380,7 @@ async def triage_ask_age(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/triage.py:triage_ask_age user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     if _is_cancel(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="triage")
         await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -390,6 +401,7 @@ async def triage_ask_duration(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/triage.py:triage_ask_duration user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     if _is_cancel(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="triage")
         await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -409,11 +421,19 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/triage.py:triage_get_complaint user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     if _is_cancel(text):
+        track_fsm_cancel(message.from_user.id, await state.get_state(), scenario="triage")
         await message.answer(TRIAGE_CANCELLED_BY_USER, reply_markup=main_menu_kb())
         await state.clear()
         return
 
     if not text:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="triage",
+            reason="empty_complaint",
+            text=text,
+        )
         await message.answer(TRIAGE_EMPTY_COMPLAINT)
         return
 

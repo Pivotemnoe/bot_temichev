@@ -12,7 +12,7 @@ from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
 from app.pets_texts import PETS_ADD_START, PETS_ADD_CANCELLED, PETS_ADDED_SUCCESS
 from app.states import AddPetStates
 from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
-from app.services.analytics import EVENT_PET_CREATED, track_event
+from app.services.analytics import EVENT_PET_CREATED, EVENT_PET_CREATE_STARTED, track_event, track_fsm_invalid_input
 from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 router = Router()
@@ -96,6 +96,7 @@ async def add_pet_start(message: Message, state: FSMContext):
         return
 
     # Лимит не превышен — запускаем FSM добавления питомца.
+    track_event(user["id"], EVENT_PET_CREATE_STARTED, {"source": "legacy_menu"})
     await message.answer(
         PETS_ADD_START,
         reply_markup=pet_type_kb(),
@@ -141,6 +142,13 @@ async def add_pet_choose_type(message: Message, state: FSMContext):
             pet_type = "dog"
 
     if pet_type is None:
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="pet_create",
+            reason="unsupported_pet_type",
+            text=raw_text,
+        )
         await message.answer(
             "Сейчас бот работает только с кошками и собаками.\n"
             "Пожалуйста, выберите вариант из клавиатуры:",

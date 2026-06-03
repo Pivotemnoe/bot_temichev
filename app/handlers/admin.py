@@ -143,6 +143,14 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🔁 Удержание", callback_data="admin:retention:30"),
                 InlineKeyboardButton(text="🧾 Расходы", callback_data="admin:costs:7"),
             ],
+            [
+                InlineKeyboardButton(text="🩺 Жалобы", callback_data="admin:complaints:30"),
+                InlineKeyboardButton(text="🍽️ Питание", callback_data="admin:food:30"),
+            ],
+            [
+                InlineKeyboardButton(text="🧭 Сценарии", callback_data="admin:dropoffs:30"),
+                InlineKeyboardButton(text="⚠️ Ошибки", callback_data="admin:fsm:30"),
+            ],
             [InlineKeyboardButton(text="🔗 Источники", callback_data="admin:sources:30")],
             [
                 InlineKeyboardButton(text="🛡 Аудит", callback_data="admin:audit:30"),
@@ -183,6 +191,9 @@ def _fmt_admin_date(value: str | None) -> str:
 
 EVENT_LABELS = {
     "app_start": "Запуски",
+    "registration_started": "Начало регистрации",
+    "user_registered": "Регистрации",
+    "pet_create_started": "Начато добавление питомца",
     "triage_started": "Начато разборов",
     "triage_completed": "Завершено разборов",
     "paywall_shown": "Показы экрана подписки",
@@ -191,6 +202,11 @@ EVENT_LABELS = {
     "followup_scheduled": "Контрольные вопросы запланированы",
     "followup_sent": "Контрольные вопросы отправлены",
     "followup_answered": "Контрольные вопросы с ответом",
+    "food_search_started": "Начато поисков питания",
+    "food_query": "Запросы по питанию",
+    "food_complex_dish": "Готовые блюда",
+    "fsm_cancelled": "Отмены сценариев",
+    "fsm_invalid_input": "Ошибки ввода в сценариях",
     "pet_created": "Питомцев создано",
     "pet_set_main": "Основной питомец выбран",
 }
@@ -201,6 +217,11 @@ CSV_SECTION_LABELS = {
     "triage_by_plan": "Разборы по тарифам",
     "urgency": "Срочность",
     "funnel": "Воронка",
+    "conversion_funnel": "Воронка по пользователям",
+    "complaints": "Частые жалобы",
+    "food": "Частые запросы питания",
+    "dropoffs": "Бросания сценариев",
+    "fsm": "Ошибки сценариев",
     "payments": "Платежи",
     "subscriptions": "Подписки",
     "retention": "Удержание",
@@ -226,6 +247,23 @@ CSV_METRIC_LABELS = {
     "source_type": "Тип источника",
     "starts": "Запуски",
     "cr_to_pay": "Конверсия в оплату",
+    "started": "Начали",
+    "completed": "Завершили",
+    "abandoned": "Бросили",
+    "cancelled": "Явные отмены",
+    "completion_rate": "Доля завершения",
+    "topic": "Тема",
+    "query": "Запрос",
+    "found": "Найдено",
+    "not_found": "Не найдено",
+    "needs_composition": "Нужен состав",
+    "scenario": "Сценарий",
+    "state": "Состояние",
+    "reason": "Причина",
+    "red": "Красная срочность",
+    "yellow": "Жёлтая срочность",
+    "green": "Зелёная срочность",
+    "unknown": "Не определено",
 }
 
 URGENCY_LABELS = {
@@ -239,6 +277,28 @@ SOURCE_TYPE_LABELS = {
     "direct": "прямой вход",
     "utm": "UTM",
     "clinic_link": "ссылка клиники",
+}
+
+SCENARIO_LABELS = {
+    "registration": "Регистрация",
+    "pet_create": "Добавление питомца",
+    "triage": "Разбор жалобы",
+    "food_search": "Питание",
+    "care_search": "Уход",
+    "faq_search": "Вопросы и ответы",
+    "plus_payment": "Оплата Plus",
+    "unknown": "Неизвестный сценарий",
+}
+
+FSM_REASON_LABELS = {
+    "unsupported_pet_type": "неподдерживаемый тип животного",
+    "unknown_pet_choice": "не выбран питомец из списка",
+    "empty_complaint": "пустая жалоба",
+    "empty_food_query": "пустой запрос питания",
+    "empty_dish_composition": "пустой состав блюда",
+    "empty_care_query": "пустой запрос по уходу",
+    "empty_faq_query": "пустой вопрос",
+    "invalid_input": "неверный ввод",
 }
 
 
@@ -259,6 +319,16 @@ def _csv_metric_label(metric: str) -> str:
 def _source_type_label(value: str | None) -> str:
     raw = str(value or "direct")
     return SOURCE_TYPE_LABELS.get(raw, raw)
+
+
+def _scenario_label(value: str | None) -> str:
+    raw = str(value or "unknown")
+    return SCENARIO_LABELS.get(raw, raw)
+
+
+def _fsm_reason_label(value: str | None) -> str:
+    raw = str(value or "invalid_input")
+    return FSM_REASON_LABELS.get(raw, raw)
 
 
 def render_admin_period_report(label: str, date_from: str, date_to: str) -> str:
@@ -305,13 +375,31 @@ def render_admin_period_report(label: str, date_from: str, date_to: str) -> str:
 
 
 def render_admin_funnel_report(label: str, date_from: str, date_to: str) -> str:
-    funnel = get_admin_dashboard_stats(date_from, date_to)["funnel"]
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    funnel = stats["conversion_funnel"]
     starts = funnel.get("app_start", 0)
-    rows = ["app_start", "triage_completed", "paywall_shown", "pay_clicked", "payment_success"]
-    lines = [f"<b>🧪 Воронка — {html.escape(label)}</b>", ""]
-    for key in rows:
+    rows = [
+        "app_start",
+        "registration_started",
+        "user_registered",
+        "pet_created",
+        "triage_completed",
+        "paywall_shown",
+        "pay_clicked",
+        "payment_success",
+    ]
+    lines = [f"<b>🧪 Воронка пользователей — {html.escape(label)}</b>", ""]
+    previous = 0
+    for idx, key in enumerate(rows):
         value = int(funnel.get(key, 0) or 0)
-        lines.append(f"{_event_label(key)}: <b>{value}</b> ({_pct(value, starts)} от запусков)")
+        if idx == 0:
+            lines.append(f"{_event_label(key)}: <b>{value}</b>")
+        else:
+            lines.append(
+                f"{_event_label(key)}: <b>{value}</b> "
+                f"({_pct(value, starts)} от запусков, {_pct(value, previous)} от прошлого шага)"
+            )
+        previous = value
     return "\n".join(lines)
 
 
@@ -417,6 +505,83 @@ def render_admin_sources_report(label: str, date_from: str, date_to: str) -> str
         )
     if len(lines) == 2:
         lines.append("Нет запусков за период.")
+    return "\n".join(lines)
+
+
+def render_admin_complaints_report(label: str, date_from: str, date_to: str) -> str:
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    rows = stats.get("complaints") or []
+    lines = [f"<b>🩺 Частые жалобы — {html.escape(label)}</b>", ""]
+    if not rows:
+        lines.append("Жалоб за период нет.")
+        return "\n".join(lines)
+
+    for row in rows:
+        examples = row.get("examples") or []
+        example_text = f"\n   пример: {html.escape(str(examples[0]))}" if examples else ""
+        lines.append(
+            f"• {html.escape(str(row.get('topic') or 'другое'))}: <b>{row.get('count', 0)}</b> "
+            f"(🟥 {row.get('red', 0)} / 🟡 {row.get('yellow', 0)} / 🟢 {row.get('green', 0)} / ? {row.get('unknown', 0)})"
+            f"{example_text}"
+        )
+    return "\n".join(lines)
+
+
+def render_admin_food_report(label: str, date_from: str, date_to: str) -> str:
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    rows = stats.get("food_queries") or []
+    lines = [f"<b>🍽️ Частые запросы питания — {html.escape(label)}</b>", ""]
+    if not rows:
+        lines.append("Запросов питания за период нет.")
+        return "\n".join(lines)
+
+    for row in rows:
+        kind = html.escape(str(row.get("kind") or "запрос"))
+        query = html.escape(str(row.get("query") or "не указано"))
+        lines.append(
+            f"• {query} ({kind}): <b>{row.get('count', 0)}</b> "
+            f"найдено {row.get('found', 0)} / не найдено {row.get('not_found', 0)} / нужен состав {row.get('needs_composition', 0)}"
+        )
+    return "\n".join(lines)
+
+
+def render_admin_dropoffs_report(label: str, date_from: str, date_to: str) -> str:
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    rows = stats.get("dropoffs") or []
+    lines = [f"<b>🧭 Где пользователи бросают сценарии — {html.escape(label)}</b>", ""]
+    if not rows:
+        lines.append("Событий по сценариям за период нет.")
+        return "\n".join(lines)
+
+    for row in rows:
+        scenario = _scenario_label(row.get("scenario"))
+        started = int(row.get("started", 0) or 0)
+        completed = int(row.get("completed", 0) or 0)
+        abandoned = int(row.get("abandoned", 0) or 0)
+        cancelled = int(row.get("cancelled", 0) or 0)
+        lines.append(
+            f"• {html.escape(scenario)}: начали <b>{started}</b>, завершили <b>{completed}</b>, "
+            f"бросили <b>{abandoned}</b>, явных отмен {cancelled}, завершение {_pct(completed, started)}"
+        )
+    return "\n".join(lines)
+
+
+def render_admin_fsm_report(label: str, date_from: str, date_to: str) -> str:
+    stats = get_admin_dashboard_stats(date_from, date_to)
+    rows = stats.get("fsm_errors") or []
+    lines = [f"<b>⚠️ Ошибки сценариев — {html.escape(label)}</b>", ""]
+    if not rows:
+        lines.append("Ошибок ввода в сценариях за период нет.")
+        return "\n".join(lines)
+
+    for row in rows:
+        scenario = _scenario_label(row.get("scenario"))
+        state = html.escape(str(row.get("state") or "unknown"))
+        reason = _fsm_reason_label(row.get("reason"))
+        lines.append(
+            f"• {html.escape(scenario)}: <b>{row.get('count', 0)}</b> — "
+            f"{html.escape(reason)} ({state})"
+        )
     return "\n".join(lines)
 
 
@@ -620,6 +785,38 @@ def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
     for metric, value in stats["funnel"].items():
         add("funnel", metric, "", value)
 
+    for metric, value in stats.get("conversion_funnel", {}).items():
+        add("conversion_funnel", metric, "", value)
+
+    for row in stats.get("complaints", []):
+        topic = str(row.get("topic") or "другое")
+        add("complaints", "count", topic, row.get("count", 0))
+        add("complaints", "red", topic, row.get("red", 0))
+        add("complaints", "yellow", topic, row.get("yellow", 0))
+        add("complaints", "green", topic, row.get("green", 0))
+        add("complaints", "unknown", topic, row.get("unknown", 0))
+
+    for row in stats.get("food_queries", []):
+        query = str(row.get("query") or "не указано")
+        add("food", "query", query, row.get("kind", ""))
+        add("food", "count", query, row.get("count", 0))
+        add("food", "found", query, row.get("found", 0))
+        add("food", "not_found", query, row.get("not_found", 0))
+        add("food", "needs_composition", query, row.get("needs_composition", 0))
+
+    for row in stats.get("dropoffs", []):
+        scenario = _scenario_label(row.get("scenario"))
+        add("dropoffs", "started", scenario, row.get("started", 0))
+        add("dropoffs", "completed", scenario, row.get("completed", 0))
+        add("dropoffs", "abandoned", scenario, row.get("abandoned", 0))
+        add("dropoffs", "cancelled", scenario, row.get("cancelled", 0))
+        add("dropoffs", "completion_rate", scenario, row.get("completion_rate", 0))
+
+    for row in stats.get("fsm_errors", []):
+        key = f"{_scenario_label(row.get('scenario'))}: {row.get('state')}"
+        add("fsm", "reason", key, _fsm_reason_label(row.get("reason")))
+        add("fsm", "count", key, row.get("count", 0))
+
     for metric, value in stats["payments"].items():
         add("payments", metric, "", value)
 
@@ -788,6 +985,14 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         text = render_admin_retention_report(label, date_from, date_to)
     elif report == "costs":
         text = render_admin_costs_report(label, date_from, date_to)
+    elif report == "complaints":
+        text = render_admin_complaints_report(label, date_from, date_to)
+    elif report == "food":
+        text = render_admin_food_report(label, date_from, date_to)
+    elif report == "dropoffs":
+        text = render_admin_dropoffs_report(label, date_from, date_to)
+    elif report == "fsm":
+        text = render_admin_fsm_report(label, date_from, date_to)
     elif report == "sources":
         text = render_admin_sources_report(label, date_from, date_to)
     elif report == "audit":

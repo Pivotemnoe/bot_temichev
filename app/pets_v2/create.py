@@ -18,7 +18,7 @@ from app.db import (
 from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
 from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
 from app.pets_v2.card import show_pet_card
-from app.services.analytics import EVENT_PET_CREATED, track_event
+from app.services.analytics import EVENT_PET_CREATED, EVENT_PET_CREATE_STARTED, track_event, track_fsm_invalid_input
 from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 
@@ -71,6 +71,7 @@ async def start_create_pet_v2(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    track_event(user["id"], EVENT_PET_CREATE_STARTED, {"source": "petv2"})
     await state.clear()
     await state.set_state(PetCreateV2States.choosing_type)
 
@@ -98,6 +99,13 @@ async def create_pet_v2_choose_type(message: Message, state: FSMContext):
         pet_type = SUPPORTED_PETS["🐶 Собака"]
 
     if not pet_type or pet_type not in set(SUPPORTED_PETS.values()):
+        track_fsm_invalid_input(
+            message.from_user.id,
+            await state.get_state(),
+            scenario="pet_create",
+            reason="unsupported_pet_type",
+            text=text,
+        )
         await message.answer("Пожалуйста, выберите тип кнопкой ниже:", reply_markup=pet_type_kb())
         return
 
