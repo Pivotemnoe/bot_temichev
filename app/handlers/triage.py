@@ -50,6 +50,7 @@ from app.services.pet_observation_service import add_observation
 from app.services.static_assets import send_static_photo
 from app.services.paywall import send_plus_paywall_explained
 from app.services.followup import create_followup_for_triage
+from app.services.medical_safety import detect_red_flags, render_red_flag_response
 from app.services.analytics import (
     EVENT_TRIAGE_COMPLETED,
     EVENT_TRIAGE_STARTED,
@@ -174,6 +175,111 @@ def _triage_start_payload(user: dict, pet_id: int) -> dict:
         "clinic_id": clinic_id,
         "prompt_mode": prompt_mode_for_context(plan_code, clinic_id=clinic_id),
     }
+
+
+def _record_red_flag_triage(
+    *,
+    user: dict,
+    pet_id: int | None,
+    complaint_text: str,
+    response_text: str,
+    quota_used: int,
+    plan_code: str,
+    clinic_id: int | None,
+    matched_red_flags: tuple[str, ...],
+) -> int | None:
+    summary = "Красные симптомы: " + ", ".join(matched_red_flags)
+    triage_log_id = None
+    try:
+        triage_log_id = log_triage_event(
+            user_id=int(user["id"]),
+            pet_id=int(pet_id) if pet_id else None,
+            complaint_text=complaint_text,
+            response_text=response_text,
+            quota_before=quota_used,
+            quota_after=quota_used,
+            urgency_level="red",
+        )
+    except Exception as e:
+        logger.warning("Failed to log pre-LLM red-flag triage: %s", e)
+
+    if triage_log_id:
+        track_event(
+            int(user["id"]),
+            EVENT_TRIAGE_COMPLETED,
+            {
+                "pet_id": int(pet_id) if pet_id else None,
+                "urgency_level": "red",
+                "triage_log_id": int(triage_log_id),
+                "plan_code": plan_code,
+                "clinic_id": clinic_id,
+                "prompt_mode": prompt_mode_for_context(plan_code, clinic_id=clinic_id, complaint_text=complaint_text),
+                "medical_safety": "red_flag_pre_llm",
+                "matched_red_flags": list(matched_red_flags),
+            },
+        )
+
+    try:
+        followup_result = create_followup_for_triage(
+            triage_event_id=triage_log_id,
+            user_id=int(user["id"]),
+            pet_id=int(pet_id) if pet_id else None,
+            urgency_level="red",
+            complaint_text=complaint_text,
+            response_summary=summary,
+        )
+        logger.info(
+            "pre_llm_red_flag_followup_%s triage_event_id=%s reason=%s scenario=%s",
+            "scheduled" if followup_result.get("created") else "skipped",
+            triage_log_id,
+            followup_result.get("reason"),
+            followup_result.get("scenario"),
+        )
+    except Exception as e:
+        logger.warning("Failed to schedule pre-LLM red-flag follow-up: %s", e)
+
+    if pet_id:
+        try:
+            add_observation(
+                user_id=int(user["id"]),
+                pet_id=int(pet_id),
+                obs_type="triage",
+                payload={
+                    "urgency_emoji": "🟥",
+                    "urgency_label": "Срочно в клинику",
+                    "urgency_level": "red",
+                    "complaint": complaint_text,
+                    "summary": summary,
+                    "triage_id": triage_log_id,
+                    "medical_safety": "red_flag_pre_llm",
+                    "matched_red_flags": list(matched_red_flags),
+                },
+                source="triage",
+            )
+        except Exception as e:
+            logger.warning("Failed to add pre-LLM red-flag observation: %s", e)
+
+        try:
+            add_pet_history_event(
+                pet_id=int(pet_id),
+                event_type="triage",
+                title="🟥 Срочно в клинику",
+                details=summary,
+                triage_id=triage_log_id,
+                metadata={
+                    "complaint": complaint_text,
+                    "summary": summary,
+                    "urgency_emoji": "🟥",
+                    "urgency_label": "Срочно в клинику",
+                    "urgency_level": "red",
+                    "medical_safety": "red_flag_pre_llm",
+                    "matched_red_flags": list(matched_red_flags),
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to add pre-LLM red-flag history event: %s", e)
+
+    return triage_log_id
 
 
 async def start_triage_flow(message: Message, state: FSMContext, telegram_id: int | None = None) -> None:
@@ -317,6 +423,37 @@ async def triage_get_complaint(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    data = await state.get_data()
+    pet_id = data.get("pet_id")
+    age_info = data.get("age_info")
+    duration_info = data.get("duration_info")
+
+    pets = get_pets_for_user(user["id"])
+    main_pet: Optional[Dict] = get_pet_by_id(int(pet_id)) if pet_id else None
+
+    red_flags = detect_red_flags(text)
+    if red_flags.has_red_flags:
+        sub = ensure_default_subscription(int(user["id"])) or {}
+        quota_used = int(sub.get("quota_used", 0) or 0)
+        plan_code = sub.get("plan_code") or sub.get("plan") or "free"
+        clinic_id = user.get("clinic_id")
+        response_text = render_red_flag_response(red_flags)
+        _record_red_flag_triage(
+            user=user,
+            pet_id=int(pet_id) if pet_id else None,
+            complaint_text=text,
+            response_text=response_text,
+            quota_used=quota_used,
+            plan_code=plan_code,
+            clinic_id=clinic_id,
+            matched_red_flags=red_flags.matched,
+        )
+        await message.answer(response_text, reply_markup=main_menu_kb())
+        if pet_id:
+            await message.answer("Событие сохранено в историю питомца.")
+        await state.clear()
+        return
+
     ok, sub = try_consume_quota(user["id"], amount=1)
     if not ok:
         await send_plus_paywall_explained(message, reason="limit", reason_text=TRIAGE_QUOTA_EXHAUSTED)
@@ -327,14 +464,6 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     quota_after = int(sub.get("quota_used", 0))
     plan_code = sub.get("plan_code") or sub.get("plan") or "free"
     clinic_id = user.get("clinic_id")
-
-    data = await state.get_data()
-    pet_id = data.get("pet_id")
-    age_info = data.get("age_info")
-    duration_info = data.get("duration_info")
-
-    pets = get_pets_for_user(user["id"])
-    main_pet: Optional[Dict] = get_pet_by_id(int(pet_id)) if pet_id else None
 
     await message.answer(TRIAGE_PROCESSING_TEXT)
 

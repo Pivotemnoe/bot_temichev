@@ -1,8 +1,8 @@
-.PHONY: check compile selftest knowledge-check security-check security-runtime-check backup-restore-check single-process-check phase-check mobile-ux-check mobile-preview backup-db restore-db docker-config docker-build docker-selftest status
+.PHONY: check compile selftest knowledge-check security-check medical-safety-check security-runtime-check backup-restore-check single-process-check phase-check mobile-ux-check mobile-preview backup-db restore-db docker-config docker-build docker-selftest status
 
 PYTHON ?= .venv/bin/python
 
-check: compile selftest knowledge-check security-check security-runtime-check backup-restore-check single-process-check phase-check mobile-ux-check
+check: compile selftest knowledge-check security-check medical-safety-check security-runtime-check backup-restore-check single-process-check phase-check mobile-ux-check
 
 compile:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m compileall -q app tools main.py
@@ -15,6 +15,9 @@ knowledge-check:
 
 security-check:
 	$(PYTHON) tools/check_secrets.py
+
+medical-safety-check:
+	$(PYTHON) tools/check_medical_safety.py
 
 security-runtime-check:
 	$(PYTHON) tools/check_security_runtime.py
