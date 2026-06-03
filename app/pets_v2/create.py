@@ -15,10 +15,11 @@ from app.db import (
     get_pets_for_user,
     ensure_default_subscription,
 )
-from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb, onb_step3_kb
+from app.keyboards import pet_type_kb, skip_kb, main_menu_kb, subscription_kb
 from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
 from app.pets_v2.card import show_pet_card
 from app.services.analytics import EVENT_PET_CREATED, track_event
+from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 
 router = Router(name="pets_v2_create")
@@ -84,7 +85,7 @@ async def start_create_pet_v2(callback: CallbackQuery, state: FSMContext):
 async def create_pet_v2_choose_type(message: Message, state: FSMContext):
     text = (message.text or "").strip()
 
-    if text.lower() in {"отменить", "cancel"}:
+    if is_cancel_text(text):
         await state.clear()
         await message.answer("Добавление питомца отменено.", reply_markup=main_menu_kb())
         return
@@ -154,7 +155,7 @@ async def create_pet_v2_choose_name(message: Message, state: FSMContext):
     # Сразу открываем карточку нового питомца (v2)
     try:
         await show_pet_card(message, int(pet_id))
-        await message.answer("Следующий шаг — можно разобрать жалобу и сохранить результат в историю.", reply_markup=onb_step3_kb())
+        await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb(int(pet_id)))
     except Exception:
         # fallback — в главное меню
         await message.answer("Открываю главное меню.", reply_markup=main_menu_kb())

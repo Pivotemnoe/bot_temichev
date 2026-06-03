@@ -8,6 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramBadRequest
 from app.services.safe_edit import safe_edit_message
 from app.keyboards import main_menu_kb
+from app.ux import BTN_BACK, BTN_MENU, WHAT_NEXT_TEXT, what_next_kb
 from .card import show_pet_card
 from app.db import (
     get_user_by_telegram_id,
@@ -70,22 +71,22 @@ def _stats_kb(pet_id: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить вес", callback_data=_cb("add", pet_id))
     kb.button(text="📋 История веса", callback_data=_cb("list", pet_id))
-    kb.button(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")
-    kb.button(text="🏠 Главное меню", callback_data=_cb("menu", pet_id))
+    kb.button(text=BTN_BACK, callback_data=f"petcard:overview:{pet_id}")
+    kb.button(text=BTN_MENU, callback_data=_cb("menu", pet_id))
     kb.adjust(1, 1, 1, 1)
     return kb
 def _confirm_kb(pet_id: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Сохранить", callback_data=_cb("confirm_save", pet_id))
-    kb.button(text="❌ Отменить", callback_data=_cb("cancel", pet_id))
-    kb.button(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=_cb("cancel", pet_id))
+    kb.button(text=BTN_BACK, callback_data=f"petcard:overview:{pet_id}")
     kb.adjust(1, 1, 1)
     return kb
 def _note_kb(pet_id: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭️ Пропустить заметку", callback_data=_cb("skip_note", pet_id))
-    kb.button(text="❌ Отменить", callback_data=_cb("cancel", pet_id))
-    kb.button(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=_cb("cancel", pet_id))
+    kb.button(text=BTN_BACK, callback_data=f"petcard:overview:{pet_id}")
     kb.adjust(1, 1, 1)
     return kb
 @router.callback_query(F.data.startswith(f"{CB_PREFIX}:"))
@@ -175,6 +176,7 @@ async def petstats_router(callback: CallbackQuery, state: FSMContext) -> None:
             msg_lines += ["", "⚠️ " + insight_text]
         await callback.message.answer("\n".join(msg_lines))
         await show_pet_card(callback.message, pet_id)
+        await callback.message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb(pet_id))
         await callback.answer()
         return
     if action == "cancel":
@@ -206,7 +208,7 @@ async def petstats_router(callback: CallbackQuery, state: FSMContext) -> None:
         return
     if action == "menu":
         # Главное меню в проекте реализовано reply-клавиатурой (не inline).
-        await callback.message.answer("🏠 Главное меню", reply_markup=main_menu_kb())
+        await callback.message.answer("Главное меню:", reply_markup=main_menu_kb())
         await callback.answer()
         return
     await callback.answer()

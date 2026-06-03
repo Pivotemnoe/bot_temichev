@@ -46,6 +46,7 @@ from app.services.subscription_resolver import maybe_show_subscription_offer, DE
 from app.services.static_assets import send_static_photo
 from app.services.analytics import EVENT_PAYMENT_SUCCESS, EVENT_PAY_CLICKED, track_event
 from app.services.payment_reconcile import payment_access_note, payment_not_found_text, payment_status_label
+from app.ux import BTN_MENU
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ MAIN_MENU_BUTTONS = (
     "🔍 Поиск по наблюдениям",
 
     "🧴 Уход и привычки",
-    "⬅️ В главное меню",
+    BTN_MENU,
     "📅 Напоминания",
     "🐾 Питомцы",
     "➕ Добавить животное",
@@ -239,7 +240,7 @@ async def callback_paywall_back(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(F.text == "⬅️ В главное меню")
+@router.message(F.text == BTN_MENU)
 async def back_to_main_menu(message: Message, state: FSMContext):
     _state = None
     try:

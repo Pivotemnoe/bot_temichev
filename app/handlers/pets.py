@@ -13,6 +13,7 @@ from app.pets_texts import PETS_ADD_START, PETS_ADD_CANCELLED, PETS_ADDED_SUCCES
 from app.states import AddPetStates
 from app.constants import PETS_LIMIT_BY_PLAN, SUPPORTED_PETS
 from app.services.analytics import EVENT_PET_CREATED, track_event
+from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 router = Router()
 
@@ -111,7 +112,7 @@ async def add_pet_choose_type(message: Message, state: FSMContext):
     raw_text = (message.text or "").strip()
     text = raw_text.lower()
 
-    if text in {"отменить", "⬅️ в главное меню"}:
+    if is_cancel_text(raw_text):
         await message.answer(
             PETS_ADD_CANCELLED,
             reply_markup=main_menu_kb(),
@@ -175,7 +176,7 @@ async def add_pet_set_name(message: Message, state: FSMContext):
         return
 
     text = (message.text or "").strip()
-    if text.lower() in {"отменить", "⬅️ в главное меню"}:
+    if is_cancel_text(text):
         await message.answer(
             PETS_ADD_CANCELLED,
             reply_markup=main_menu_kb(),
@@ -239,4 +240,5 @@ async def add_pet_set_name(message: Message, state: FSMContext):
         PETS_ADDED_SUCCESS.format(pets_block=pets_block),
         reply_markup=main_menu_kb(),
     )
+    await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb(int(pet_id)))
     await state.clear()

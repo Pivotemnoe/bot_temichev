@@ -18,6 +18,7 @@ from app.db import (
     count_pet_history,
 )
 from app.keyboards import main_menu_kb
+from app.ux import BTN_BACK
 from app.services.subscription_resolver import maybe_show_subscription_offer, get_offer_text
 from app.services.subscription_limits import can_access_history
 from app.services.paywall import send_plus_paywall_explained
@@ -103,7 +104,7 @@ def _kb(pet_id: int, offset: int, flt: str, total: int) -> InlineKeyboardMarkup:
     if offset > 0:
         paging_row.append(
             InlineKeyboardButton(
-                text="⬅️ Назад",
+                text=BTN_BACK,
                 callback_data=f"petcard:history:{pet_id}:{prev_offset}:{flt}",
             )
         )
@@ -117,7 +118,7 @@ def _kb(pet_id: int, offset: int, flt: str, total: int) -> InlineKeyboardMarkup:
     if paging_row:
         rows.append(paging_row)
 
-    rows.append([InlineKeyboardButton(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")])
+    rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data=f"petcard:overview:{pet_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

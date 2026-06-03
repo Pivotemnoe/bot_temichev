@@ -78,6 +78,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardRemove
 
 from app.keyboards import main_menu_kb, onb_step3_kb
+from app.ux import BTN_BACK
 from app.db import (
     get_user_by_telegram_id,
     get_pet_by_id,
@@ -89,7 +90,6 @@ from app.db import (
     list_pet_history,
     get_pet_observations,
     get_pet_reminders,
-    get_user_reminders,
     list_pet_vaccinations,
     list_pet_measurements,
     update_pet_name,
@@ -124,7 +124,7 @@ def _edit_menu_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb.button(text="Дата рождения", callback_data=_cb("edit_birth", pet_id))
     kb.button(text="Пол", callback_data=_cb("edit_sex", pet_id))
     kb.button(text="Порода", callback_data=_cb("edit_breed", pet_id))
-    kb.button(text="⬅️ Назад", callback_data=_cb("overview", pet_id))
+    kb.button(text=BTN_BACK, callback_data=_cb("overview", pet_id))
     kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
@@ -324,7 +324,7 @@ def _pet_stats_kb(pet_id: int) -> InlineKeyboardMarkup:
 def _pet_vaccinations_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить вакцинацию", callback_data=f"pet:vacc_add:{pet_id}")
-    kb.button(text="⬅️ В карточку", callback_data=_cb("overview", pet_id))
+    kb.button(text=BTN_BACK, callback_data=_cb("overview", pet_id))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -335,7 +335,7 @@ def _pet_reminders_kb(pet_id: int, *, has_reminders: bool = False) -> InlineKeyb
     if has_reminders:
         kb.button(text="✏️ Изменить напоминание", callback_data=f"petrem:editpick:{pet_id}")
         kb.button(text="🗑 Удалить напоминание", callback_data=f"petrem:delpick:{pet_id}")
-    kb.button(text="⬅️ В карточку", callback_data=_cb("overview", pet_id))
+    kb.button(text=BTN_BACK, callback_data=_cb("overview", pet_id))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -343,7 +343,7 @@ def _pet_reminders_kb(pet_id: int, *, has_reminders: bool = False) -> InlineKeyb
 def _confirm_delete_kb(pet_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Да, удалить", callback_data=_cb("delete_confirm", pet_id))
-    kb.button(text="❌ Отмена", callback_data=_cb("overview", pet_id))
+    kb.button(text=BTN_BACK, callback_data=_cb("overview", pet_id))
     kb.adjust(2)
     return kb.as_markup()
 
@@ -402,13 +402,75 @@ def _triage_history_preview_lines(pet_id: int) -> list[str]:
     return lines
 
 
+def _current_important_lines(pet_id: int, owner_id: int) -> list[str]:
+    lines = ["Что важно сейчас:"]
+    added = 0
+
+    try:
+        triage_events = get_pet_history(pet_id=pet_id, limit=1, event_types=["triage"])
+    except Exception:
+        triage_events = []
+    if triage_events:
+        event = triage_events[0]
+        meta = event.get("metadata") or {}
+        urgency = (meta.get("urgency_level") or "").strip().lower()
+        urgency_emoji = meta.get("urgency_emoji") or ""
+        summary = _one_line(meta.get("summary") or event.get("details") or event.get("title"), limit=120)
+        if urgency in {"red", "yellow"}:
+            lines.append(f"• {urgency_emoji} Последний разбор требует внимания: {summary}")
+        elif summary:
+            lines.append(f"• Последний разбор: {summary}")
+        added += 1
+
+    try:
+        reminders = [
+            r
+            for r in get_pet_reminders(owner_id, pet_id)
+            if r.get("is_active") in (None, 1, "1", True)
+        ]
+    except Exception:
+        reminders = []
+    reminders.sort(key=lambda r: (str(r.get("due_date") or ""), str(r.get("due_time") or "")))
+    if reminders:
+        r = reminders[0]
+        when = " ".join(part for part in (r.get("due_date"), r.get("due_time")) if part).strip()
+        title = r.get("title") or "напоминание"
+        lines.append(f"• Ближайшее напоминание: {when} — {title}".rstrip(" —"))
+        added += 1
+
+    try:
+        measurements = list_pet_measurements(pet_id, limit=1)
+    except Exception:
+        measurements = []
+    if measurements:
+        row = measurements[0]
+        weight = row.get("weight_kg")
+        created = _fmt_admin_like_date(row.get("created_at"))
+        if weight is not None:
+            lines.append(f"• Последний вес: {weight} кг ({created})")
+            added += 1
+
+    if not added:
+        lines.append("• Критичных событий не видно. Добавьте разбор, вес или напоминание, чтобы я показывал динамику.")
+    return lines
+
+
+def _fmt_admin_like_date(value: str | None) -> str:
+    if not value:
+        return "дата не указана"
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%d.%m.%Y")
+    except Exception:
+        return str(value)[:10]
+
+
 def _build_overview_text(pet: dict, owner_id: int) -> str:
     pet = _normalize_pet(pet)
     pet_id = int(pet.get("id") or 0)
 
     # lightweight "statuses" as counts
     v_count = len(list_pet_vaccinations(pet_id)) if pet_id else 0
-    r_count = len(get_user_reminders(owner_id)) if owner_id else 0
+    r_count = len(get_pet_reminders(owner_id, pet_id)) if owner_id and pet_id else 0
     o_count = len(get_pet_observations(pet_id)) if pet_id else 0
 
     lines = [
@@ -480,6 +542,11 @@ def _build_overview_text(pet: dict, owner_id: int) -> str:
         details.append(f"• Дата рождения: {legacy_birth}")
     if details:
         lines += ["Данные:"] + details + [""]
+
+    lines += [
+        *_current_important_lines(pet_id, owner_id),
+        "",
+    ]
 
     lines += [
         "Статусы:",

@@ -34,6 +34,7 @@ from app.services.analytics import (
     track_event,
 )
 from app.services.clinic import get_clinic_profile, render_clinic_start_note
+from app.ux import BTN_MENU, is_cancel_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _welcome_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👤 Зарегистрироваться")],
-            [KeyboardButton(text="📋 Главное меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
     )
@@ -237,7 +238,7 @@ async def cmd_start(message: Message, state: FSMContext):
     intro_lines.append(START_NEED_REGISTER)
     intro_lines.append(
         "Нажмите «👤 Зарегистрироваться и добавить питомца», чтобы бот сразу работал точнее.\n"
-        "Или выберите «📋 Открыть главное меню», если хотите сначала осмотреть разделы."
+        "Или выберите «⬅️ В меню», если хотите сначала осмотреть разделы."
     )
 
     text = "\n\n".join(intro_lines)
@@ -265,7 +266,7 @@ async def start_registration(message: Message, state: FSMContext):
     await state.set_state(RegistrationStates.waiting_for_name)
 
 
-@router.message(F.text.in_({"📋 Главное меню", "📋 Открыть главное меню", "🏠 Меню", "🏠 Главное меню"}))
+@router.message(F.text.in_({BTN_MENU, "📋 Главное меню", "📋 Открыть главное меню", "🏠 Меню", "🏠 Главное меню"}))
 async def open_main_menu_from_start(message: Message, state: FSMContext):
     _state = None
     try:
@@ -294,7 +295,7 @@ async def reg_get_name(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/start.py:reg_get_name user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     low = text.lower()
-    if low in {"отменить", "⬅️ в главное меню", "📋 открыть главное меню"}:
+    if is_cancel_text(text) or low == "📋 открыть главное меню":
         await message.answer("Ок.", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -322,7 +323,7 @@ async def reg_pet_type(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/start.py:reg_pet_type user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
 
-    if text.lower() == "отменить":
+    if is_cancel_text(text):
         await message.answer(
             "Регистрация прервана. Вы можете начать сначала командой /start.",
             reply_markup=main_menu_kb(),
@@ -361,7 +362,7 @@ async def reg_pet_name(message: Message, state: FSMContext):
     logger.info("[HANDLER] app/handlers/start.py:reg_pet_name user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
     low = text.lower()
-    if low in {"отменить", "⬅️ в главное меню", "📋 открыть главное меню"}:
+    if is_cancel_text(text) or low == "📋 открыть главное меню":
         await message.answer("Ок.", reply_markup=main_menu_kb())
         await state.clear()
         return

@@ -1,4 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from app.ux import BTN_MENU
 
 
 def nutrition_menu_kb() -> ReplyKeyboardMarkup:
@@ -15,7 +16,7 @@ def nutrition_menu_kb() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="✅ Что можно"),
                 KeyboardButton(text="⛔ Что нельзя"),
             ],
-            [KeyboardButton(text="⬅️ В главное меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -33,7 +34,7 @@ def faq_menu_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📌 Популярные вопросы")],
             [KeyboardButton(text="🔍 Найти ответ по вопросу")],
-            [KeyboardButton(text="⬅️ В главное меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -51,7 +52,7 @@ def care_menu_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📋 Карточки по уходу")],
             [KeyboardButton(text="🔍 Найти по теме ухода")],
-            [KeyboardButton(text="⬅️ В главное меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,

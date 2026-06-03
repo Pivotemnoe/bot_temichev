@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ from app.db import (
     get_subscription,
 )
 from app.constants import SUBSCRIPTION_BUTTONS, SUBSCRIPTION_PLANS, build_subscription_text
+from app.ux import WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 router = Router()
 
@@ -71,7 +73,7 @@ MAIN_MENU_TEXTS: set[str] = {
     "🧴 Уход и привычки",
     "❓ Вопросы и ответы",
         "❓ Вопрос–Ответ",
-    "⬅️ В главное меню",
+    "⬅️ В меню",
     "📋 Карточки по уходу",
     "🔍 Найти продукт",
     "🔍 Найти по теме ухода",
@@ -93,6 +95,7 @@ MAIN_MENU_TEXTS_LIST: tuple[str, ...] = tuple(MAIN_MENU_TEXTS)
 
 class KnowledgeStates(StatesGroup):
     waiting_food_query = State()
+    waiting_food_composition = State()
     waiting_faq_query = State()
     waiting_care_query = State()
 
@@ -237,6 +240,135 @@ def _format_food_item(item: dict) -> str:
     return "\n".join(parts)
 
 
+COMPLEX_DISH_KEYWORDS = {
+    "борщ",
+    "гуляш",
+    "котлета",
+    "котлеты",
+    "паста",
+    "суп",
+    "рагу",
+    "плов",
+    "салат",
+    "запеканка",
+}
+
+DISH_INGREDIENT_ALIASES = {
+    "картошка": "картофель",
+    "картошкой": "картофель",
+    "луком": "лук",
+    "чесноком": "чеснок",
+    "солью": "соль",
+    "специями": "специи",
+    "приправами": "специи",
+    "морковью": "морковь",
+    "капустой": "капуста",
+    "курицей": "курица",
+    "говядиной": "говядина",
+    "свининой": "свинина",
+    "фаршем": "фарш",
+    "фарш": "мясо",
+    "томатной пастой": "томатная паста",
+}
+
+DISH_DANGEROUS_HINTS = {
+    "лук": "лук",
+    "чеснок": "чеснок",
+    "соль": "соль",
+    "специи": "специи",
+    "соус": "соусы",
+    "майонез": "майонез",
+    "перец": "острые специи",
+}
+
+
+def _complex_dish_name(text: str) -> str | None:
+    normalized = (text or "").strip().lower()
+    for keyword in COMPLEX_DISH_KEYWORDS:
+        if re.search(rf"\b{re.escape(keyword)}\b", normalized):
+            return keyword
+    return None
+
+
+def _extract_ingredients_from_text(text: str, dish_name: str | None = None) -> list[str]:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return []
+    if "без " in normalized and not any(mark in normalized for mark in (",", ";", "состав:")):
+        return []
+    if "состав:" in normalized:
+        normalized = normalized.split("состав:", 1)[1]
+    elif dish_name:
+        normalized = re.sub(rf"\b{re.escape(dish_name)}\b", " ", normalized)
+
+    normalized = re.sub(r"\b(с|из|и|со|в составе|состав)\b", ",", normalized)
+    parts = [part.strip(" .;:-—") for part in normalized.replace(";", ",").split(",")]
+    return [part for part in parts if len(part) >= 3 and part not in COMPLEX_DISH_KEYWORDS]
+
+
+def _normalize_dish_ingredient(ingredient: str) -> str:
+    value = (ingredient or "").strip().lower()
+    return DISH_INGREDIENT_ALIASES.get(value, value)
+
+
+def _dangerous_dish_hint(ingredient: str) -> str | None:
+    value = _normalize_dish_ingredient(ingredient)
+    for needle, label in DISH_DANGEROUS_HINTS.items():
+        if needle in value:
+            return label
+    return None
+
+
+def _format_complex_dish_result(dish_name: str, ingredients: list[str]) -> str:
+    lines = [
+        f"🍽️ <b>{dish_name.capitalize()}: проверка по составу</b>",
+        "",
+    ]
+    if not ingredients:
+        lines.append("Я не увидел состав блюда. Перечислите ингредиенты через запятую.")
+        return "\n".join(lines)
+
+    unsafe: list[str] = []
+    unknown: list[str] = []
+    checked: list[str] = []
+    for ingredient in ingredients[:12]:
+        dangerous_hint = _dangerous_dish_hint(ingredient)
+        if dangerous_hint:
+            unsafe.append(dangerous_hint)
+            checked.append(f"• {ingredient}: ⛔ лучше не давать ({dangerous_hint})")
+            continue
+
+        query = _normalize_dish_ingredient(ingredient)
+        matches = find_food(query, limit=1)
+        if not matches:
+            unknown.append(ingredient)
+            continue
+        item = matches[0]
+        name = item.get("name") or ingredient
+        allowed = item.get("allowed")
+        if allowed is False:
+            unsafe.append(str(name))
+        checked.append(f"• {ingredient}: {('⛔ нельзя' if allowed is False else '✅ допустимо/с осторожностью')} ({name})")
+
+    if checked:
+        lines.append("Проверил ингредиенты:")
+        lines.extend(checked)
+        lines.append("")
+    if unsafe:
+        lines.append("Итог: лучше <b>не давать</b>, потому что в составе есть потенциально опасные ингредиенты:")
+        lines.append(", ".join(dict.fromkeys(unsafe)))
+    elif unknown:
+        lines.append("Итог: точный вывод сделать нельзя — часть состава не найдена в базе.")
+    else:
+        lines.append("Итог: явных опасных ингредиентов по базе не нашёл, но давайте небольшими порциями и без специй.")
+    if unknown:
+        lines.append("")
+        lines.append("Не нашёл в базе: " + ", ".join(unknown))
+    lines.append("")
+    lines.append("Для готовых блюд важны соль, специи, лук, чеснок, соусы, жирность и способ приготовления.")
+    return "\n".join(lines)
+
+
 def _format_faq_item(item: dict) -> str:
     q = item.get("question", "Вопрос")
     short = item.get("short_answer") or ""
@@ -333,7 +465,7 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
         if text in ("❓ Вопросы и ответы", "❓ Вопрос–Ответ"):
             await menu_faq(message, state)
             return
-        if text == "⬅️ В главное меню":
+        if is_cancel_text(text):
             await message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
             return
         # Иначе просто вернём пользователя в главное меню
@@ -341,7 +473,7 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
         return
 
     # Универсальный выход
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,
@@ -354,6 +486,23 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
             NUTRITION_EMPTY_QUERY,
             reply_markup=nutrition_menu_kb(),
         )
+        return
+
+    dish_name = _complex_dish_name(text)
+    if dish_name:
+        ingredients = _extract_ingredients_from_text(text, dish_name=dish_name)
+        if not ingredients:
+            await state.update_data(food_dish_name=dish_name)
+            await state.set_state(KnowledgeStates.waiting_food_composition)
+            await message.answer(
+                f"Это готовое блюдо: <b>{dish_name}</b>.\n\n"
+                "Я не буду угадывать рецепт. Напишите состав через запятую: мясо, картофель, лук, соль, специи и т.д.\n"
+                "Если какого-то ингредиента нет, его не указывайте.",
+                reply_markup=nutrition_menu_kb(),
+            )
+            return
+        await message.answer(_format_complex_dish_result(dish_name, ingredients), reply_markup=nutrition_menu_kb())
+        await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb())
         return
 
     # Питание доступно всем тарифам — фильтрацию по plan не применяем.
@@ -375,6 +524,30 @@ async def nutrition_handle_query(message: Message, state: FSMContext) -> None:
         NUTRITION_TRY_ANOTHER,
         reply_markup=nutrition_menu_kb(),
     )
+    await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb())
+
+
+@router.message(KnowledgeStates.waiting_food_composition)
+async def nutrition_handle_complex_dish_composition(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if is_cancel_text(text):
+        await state.clear()
+        await message.answer(BACK_TO_MAIN_MENU_TEXT, reply_markup=main_menu_kb())
+        return
+
+    data = await state.get_data()
+    dish_name = str(data.get("food_dish_name") or "блюдо")
+    ingredients = _extract_ingredients_from_text(text, dish_name=None)
+    if not ingredients:
+        await message.answer(
+            "Напишите состав через запятую. Например: говядина, картофель, морковь, лук, соль.",
+            reply_markup=nutrition_menu_kb(),
+        )
+        return
+
+    await message.answer(_format_complex_dish_result(dish_name, ingredients), reply_markup=nutrition_menu_kb())
+    await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb())
+    await state.set_state(KnowledgeStates.waiting_food_query)
 
 
 # ===== Уход и привычки: меню и поиск =====
@@ -465,14 +638,14 @@ async def care_handle_query(message: Message, state: FSMContext) -> None:
         if text in ("❓ Вопросы и ответы", "❓ Вопрос–Ответ"):
             await menu_faq(message, state)
             return
-        if text == "⬅️ В главное меню":
+        if is_cancel_text(text):
             await message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
             return
         # Иначе просто вернём пользователя в главное меню
         await message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
         return
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,
@@ -610,14 +783,14 @@ async def faq_handle_query(message: Message, state: FSMContext) -> None:
         if text in ("❓ Вопросы и ответы", "❓ Вопрос–Ответ"):
             await menu_faq(message, state)
             return
-        if text == "⬅️ В главное меню":
+        if is_cancel_text(text):
             await message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
             return
         # Иначе просто вернём пользователя в главное меню
         await message.answer(MAIN_MENU_TITLE, reply_markup=main_menu_kb())
         return
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(
             BACK_TO_MAIN_MENU_TEXT,

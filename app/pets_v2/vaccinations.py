@@ -13,6 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from app.db import get_user_by_telegram_id, get_user_pets, get_pet_vaccinations, add_pet_vaccination, add_pet_history_event
 from app.keyboards import main_menu_kb
+from app.ux import BTN_BACK, BTN_MENU
 
 router = Router(name="pets_v2_vaccinations")
 
@@ -26,8 +27,8 @@ def _vacc_kb(pet_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить вакцинацию", callback_data=f"pet:vacc_add:{pet_id}")],
-            [InlineKeyboardButton(text="⬅️ В карточку", callback_data=f"petcard:overview:{pet_id}")],
-            [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="pet:back_to_menu")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data=f"petcard:overview:{pet_id}")],
+            [InlineKeyboardButton(text=BTN_MENU, callback_data="pet:back_to_menu")],
         ]
     )
 

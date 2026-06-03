@@ -21,8 +21,27 @@ from app.db import (
     deactivate_reminder,
     add_pet_history_event,
 )
+from app.ux import BTN_BACK, WHAT_NEXT_TEXT, what_next_kb
 
 router = Router()
+
+
+REMINDER_TEMPLATES = {
+    "vaccine": ("💉 Вакцинация", "Вакцинация", "yearly"),
+    "parasites": ("🪳 Паразиты", "Обработка от паразитов", "every_3_months"),
+    "checkup": ("🩺 Осмотр", "Плановый осмотр", "yearly"),
+    "grooming": ("✂️ Груминг", "Груминг", "monthly"),
+}
+
+PERIODICITY_LABELS = {
+    "once": "один раз",
+    "daily": "ежедневно",
+    "weekly": "еженедельно",
+    "monthly": "каждый месяц",
+    "every_3_months": "каждые 3 месяца",
+    "every_6_months": "каждые 6 месяцев",
+    "yearly": "ежегодно",
+}
 
 
 async def _safe_callback_answer(cb: CallbackQuery, text: str | None = None, *, show_alert: bool = False) -> None:
@@ -133,10 +152,23 @@ def _periodicity_kb(pet_id: int, mode: str) -> object:
         ("daily", "Ежедневно"),
         ("weekly", "Еженедельно"),
         ("monthly", "Ежемесячно"),
+        ("every_3_months", "Каждые 3 месяца"),
+        ("every_6_months", "Каждые 6 месяцев"),
+        ("yearly", "Ежегодно"),
     ]:
         kb.button(text=title, callback_data=f"petrem:{mode}:period:{code}:{pet_id}")
-    kb.button(text="⬅️ Назад", callback_data=f"petcard:reminders:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=f"petcard:reminders:{pet_id}")
     kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def _template_kb(pet_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    for code, (label, _title, _periodicity) in REMINDER_TEMPLATES.items():
+        kb.button(text=label, callback_data=f"petrem:template:{code}:{pet_id}")
+    kb.button(text="✍️ Свой текст", callback_data=f"petrem:template:custom:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=f"petcard:reminders:{pet_id}")
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -148,7 +180,7 @@ def _pick_kb(pet_id: int, reminders: list[dict], mode: str) -> object:
         title = (r.get("title") or "напоминание").strip()
         date = r.get("due_date") or ""
         kb.button(text=f"{title} ({date})", callback_data=f"petrem:{mode}:{rid}:{pet_id}")
-    kb.button(text="⬅️ Назад", callback_data=f"petcard:reminders:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=f"petcard:reminders:{pet_id}")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -156,14 +188,14 @@ def _pick_kb(pet_id: int, reminders: list[dict], mode: str) -> object:
 def _confirm_del_kb(reminder_id: int, pet_id: int) -> object:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Удалить", callback_data=f"petrem:confirmdel:{reminder_id}:{pet_id}")
-    kb.button(text="⬅️ Назад", callback_data=f"petcard:reminders:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=f"petcard:reminders:{pet_id}")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def _back_to_reminders_kb(pet_id: int) -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⬅️ К напоминаниям питомца", callback_data=f"petcard:reminders:{pet_id}")
+    kb.button(text=BTN_BACK, callback_data=f"petcard:reminders:{pet_id}")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -187,8 +219,53 @@ async def reminders_add_start(cb: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await state.update_data(pet_id=pet_id)
-    await state.set_state(ReminderV2States.entering_title)
-    await cb.message.edit_text("⏰ Добавление напоминания\n\nВведите заголовок напоминания:")
+    await cb.message.edit_text(
+        "⏰ Добавление напоминания\n\nВыберите шаблон или введите свой текст.",
+        reply_markup=_template_kb(pet_id),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("petrem:template:"))
+async def reminders_add_template(cb: CallbackQuery, state: FSMContext):
+    user = get_user_by_telegram_id(cb.from_user.id)
+    if not user:
+        await cb.answer("Нажмите /start", show_alert=True)
+        return
+    parts = (cb.data or "").split(":")
+    if len(parts) != 4:
+        await cb.answer()
+        return
+    _, _, template_code, pet_id_s = parts
+    try:
+        pet_id = int(pet_id_s)
+    except ValueError:
+        await cb.answer()
+        return
+    if not get_pet_for_user(int(user["id"]), pet_id):
+        await cb.answer("Питомец не найден", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(pet_id=pet_id)
+    if template_code == "custom":
+        await state.set_state(ReminderV2States.entering_title)
+        await cb.message.edit_text("Введите заголовок напоминания:")
+        await cb.answer()
+        return
+
+    template = REMINDER_TEMPLATES.get(template_code)
+    if not template:
+        await cb.answer()
+        return
+    label, title, periodicity = template
+    await state.update_data(title=title, reminder_type=template_code, suggested_periodicity=periodicity)
+    await state.set_state(ReminderV2States.entering_date)
+    await cb.message.edit_text(
+        f"Шаблон: {label}\n"
+        f"Тема: {title}\n\n"
+        "Введите дату первого напоминания (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД):"
+    )
     await cb.answer()
 
 
@@ -227,7 +304,11 @@ async def reminders_add_time(msg: Message, state: FSMContext):
     data = await state.get_data()
     pet_id = int(data["pet_id"])
     await state.set_state(ReminderV2States.choosing_periodicity)
-    await msg.answer("Выберите периодичность:", reply_markup=_periodicity_kb(pet_id, "create"))
+    suggested = data.get("suggested_periodicity")
+    text = "Выберите периодичность:"
+    if suggested:
+        text += f"\nРекомендация для шаблона: {PERIODICITY_LABELS.get(str(suggested), suggested)}."
+    await msg.answer(text, reply_markup=_periodicity_kb(pet_id, "create"))
 
 
 @router.callback_query(F.data.startswith("petrem:create:period:"))
@@ -294,7 +375,7 @@ async def reminders_add_notes(msg: Message, state: FSMContext):
     rid = create_reminder(
         user_id=int(user["id"]),
         pet_id=pet_id,
-        reminder_type="custom",
+        reminder_type=str(data.get("reminder_type") or "custom"),
         title=str(data["title"]),
         due_date=str(data["due_date"]),
         due_time=data.get("due_time"),
@@ -315,8 +396,7 @@ async def reminders_add_notes(msg: Message, state: FSMContext):
         pass
 
     await state.clear()
-    await msg.answer("✅ Напоминание сохранено.")
-    await msg.answer("Откройте карточку питомца → «⏰ Напоминания» для просмотра.")
+    await msg.answer("✅ Напоминание сохранено.\n\n" + WHAT_NEXT_TEXT, reply_markup=what_next_kb(pet_id))
 
 
 @router.callback_query(F.data.startswith("petrem:editpick:"))
@@ -526,7 +606,7 @@ async def reminders_edit_time(msg: Message, state: FSMContext):
         return
     pet_id = int(data["pet_id"])
     await state.set_state(ReminderV2States.editing_periodicity)
-    await msg.answer("Выберите периодичность (или нажмите «Назад» для выхода):", reply_markup=_periodicity_kb(pet_id, "edit"))
+    await msg.answer(f"Выберите периодичность (или нажмите «{BTN_BACK}» для выхода):", reply_markup=_periodicity_kb(pet_id, "edit"))
 
 
 @router.callback_query(F.data.startswith("petrem:edit:period:"))

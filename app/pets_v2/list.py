@@ -9,6 +9,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKe
 from app.db import get_user_by_telegram_id, get_pets_for_user
 from app.keyboards import main_menu_kb
 from app.services.static_assets import send_static_photo
+from app.ux import BTN_MENU
 
 router = Router(name="pets_v2_list")
 
@@ -53,7 +54,7 @@ def _pets_list_kb(pets: list[dict]) -> ReplyKeyboardMarkup:
 
     - отдельная кнопка на каждого питомца;
     - кнопка «➕ Добавить животное» для быстрого добавления;
-    - кнопка «⬅️ В главное меню» для выхода.
+    - кнопка «⬅️ В меню» для выхода.
     """
     rows: list[list[KeyboardButton]] = [
         [KeyboardButton(text=_pet_label(p))] for p in pets
@@ -62,7 +63,7 @@ def _pets_list_kb(pets: list[dict]) -> ReplyKeyboardMarkup:
     # добавить нового питомца
     rows.append([KeyboardButton(text="➕ Добавить животное")])
     # назад в главное меню
-    rows.append([KeyboardButton(text="⬅️ В главное меню")])
+    rows.append([KeyboardButton(text=BTN_MENU)])
 
     return ReplyKeyboardMarkup(
         keyboard=rows,
@@ -105,7 +106,7 @@ async def pets_list_handler(message: Message):
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Добавить животное")],
-                [KeyboardButton(text="⬅️ В главное меню")],
+                [KeyboardButton(text=BTN_MENU)],
             ],
             resize_keyboard=True,
         )
@@ -152,7 +153,7 @@ async def pets_open_card_from_label(message: Message):
         return
 
     # Не перехватываем системные кнопки этого раздела
-    if text in {"➕ Добавить животное", "⬅️ В главное меню", "🐾 Мои животные"}:
+    if text in {"➕ Добавить животное", BTN_MENU, "🐾 Мои животные"}:
         return
 
     # Быстрый фильтр: лейблы питомцев всегда содержат разделитель

@@ -304,4 +304,4 @@ PET_CARD_TEMPLATE = (
 
 BTN_EDIT_PET = "Изменить данные"
 BTN_DELETE_PET = "Удалить питомца"
-BTN_BACK = "Назад"
+BTN_BACK = "⬅️ Назад"

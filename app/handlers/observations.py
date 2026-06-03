@@ -14,6 +14,7 @@ from app.services.pet_observation_service import get_observations
 from app.states import ObservationsStates
 from app.observations_texts import OBS_PET_NOT_FOUND, OBS_SUBSCRIPTION_HINT, OBS_CANCEL_OK, OBS_CHOOSE_PET_FAIL
 from app.services.subscription_resolver import maybe_show_subscription_offer, get_offer_text, DECISION_SOFT
+from app.ux import is_cancel_text
 
 
 logger = logging.getLogger(__name__)
@@ -166,7 +167,7 @@ async def observations_choose_pet(message: Message, state: FSMContext):
         _state = None
     logger.info("[HANDLER] app/handlers/observations.py:observations_choose_pet user=%s text=%r state=%s", getattr(message.from_user, 'id', None), getattr(message, 'text', None), _state)
     text = (message.text or "").strip()
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await message.answer(OBS_CANCEL_OK, reply_markup=main_menu_kb())
         await state.clear()
         return

@@ -3,9 +3,10 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.constants import SUBSCRIPTION_BUTTONS, EXTRA_REQUEST_PRICE_RUB
+from app.ux import BTN_BACK, BTN_DONE, BTN_MENU
 
 PLUS_PAY_BUTTON = "💳 Оплатить Plus — 200 ₽"
-PLUS_BACK_BUTTON = "⬅️ Назад к подписке"
+PLUS_BACK_BUTTON = BTN_BACK
 
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
@@ -63,7 +64,7 @@ def nutrition_menu_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="✔️ Что можно")],
             [KeyboardButton(text="❌ Что нельзя")],
             [KeyboardButton(text="🔎 Поиск продукта")],
-            [KeyboardButton(text="⬅️ Назад в меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
     )
@@ -73,7 +74,7 @@ def pet_type_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🐱 Кот/Кошка"), KeyboardButton(text="🐶 Собака")],
-            [KeyboardButton(text="Отменить")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -110,7 +111,7 @@ def subscription_kb() -> ReplyKeyboardMarkup:
         KeyboardButton(text="🚪 Отписаться и удалить доступ"),
     ]
     plan_buttons.append(extra_and_unsubscribe)
-    plan_buttons.append([KeyboardButton(text="⬅️ В главное меню")])
+    plan_buttons.append([KeyboardButton(text=BTN_MENU)])
 
     return ReplyKeyboardMarkup(
         keyboard=plan_buttons,
@@ -123,7 +124,7 @@ def choose_pet_kb(labels: list[str]) -> ReplyKeyboardMarkup:
     Клавиатура выбора питомца для triage.
     """
     rows = [[KeyboardButton(text=label)] for label in labels]
-    rows.append([KeyboardButton(text="Отменить")])
+    rows.append([KeyboardButton(text=BTN_MENU)])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,
@@ -142,7 +143,7 @@ def age_group_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="1–7 лет (взрослый)")],
             [KeyboardButton(text="Старше 7 лет (возрастной)")],
             [KeyboardButton(text="Не знаю / пропустить")],
-            [KeyboardButton(text="Отменить")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -161,7 +162,7 @@ def duration_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Больше 3 дней")],
             [KeyboardButton(text="Давно, периодами")],
             [KeyboardButton(text="Не помню / пропустить")],
-            [KeyboardButton(text="Отменить")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -183,14 +184,14 @@ def subscription_inline_kb(current_plan: str | None = None) -> InlineKeyboardMar
 
     rows.append([InlineKeyboardButton(text=f"➕ Купить 1 доп. запрос ({EXTRA_REQUEST_PRICE_RUB} ₽)", callback_data="sub:buy_extra")])
     rows.append([InlineKeyboardButton(text="🚪 Отписаться и удалить доступ", callback_data="sub:unsubscribe")])
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def subscription_unsubscribe_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="✅ Да, отключить", callback_data="sub:unsubscribe:confirm")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="sub:unsubscribe:cancel")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data="sub:unsubscribe:cancel")],
         ]
     )
 
@@ -199,7 +200,7 @@ def subscription_cta_inline_kb(show_back: bool = True) -> InlineKeyboardMarkup:
     """Legacy-compatible CTA keyboard used by paywall screens."""
     rows = [[InlineKeyboardButton(text="💳 Подписка", callback_data="open:subscription")]]
     if show_back:
-        rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")])
+        rows.append([InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -208,7 +209,7 @@ def plus_paywall_inline_kb(back_callback_data: str = "open:main_menu") -> Inline
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⭐ Перейти на Plus", callback_data="open:subscription")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"paywall_back:{back_callback_data}")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data=f"paywall_back:{back_callback_data}")],
         ]
     )
 
@@ -217,7 +218,7 @@ def plus_checkout_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить Plus — 200 ₽", callback_data="pay:plus")],
-            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data="sub:back")],
         ]
     )
 
@@ -227,7 +228,7 @@ def payment_created_kb(pay_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Открыть оплату", url=pay_url)],
             [InlineKeyboardButton(text="✅ Я оплатил (проверить)", callback_data="pay:check")],
-            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data="sub:back")],
         ]
     )
 
@@ -235,7 +236,7 @@ def payment_created_kb(pay_url: str) -> InlineKeyboardMarkup:
 def pro_vip_back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад к подписке", callback_data="sub:back")],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data="sub:back")],
         ]
     )
 
@@ -244,7 +245,7 @@ def onb_step1_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить питомца", callback_data="onb:add_pet")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+            [InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")],
         ]
     )
 
@@ -266,7 +267,7 @@ def onb_step2_kb(pets: list[dict]) -> InlineKeyboardMarkup:
             ]
         )
     rows.append([InlineKeyboardButton(text="Пропустить", callback_data="onb:skip_main")])
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -274,8 +275,8 @@ def onb_step3_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🩺 Разобрать жалобу", callback_data="onb:start_triage")],
-            [InlineKeyboardButton(text="Готово", callback_data="onb:done")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+            [InlineKeyboardButton(text=BTN_DONE, callback_data="onb:done")],
+            [InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")],
         ]
     )
 
@@ -284,7 +285,8 @@ def triage_done_kb(pet_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🐾 Открыть карточку питомца", callback_data=f"petcard:overview:{pet_id}")],
-            [InlineKeyboardButton(text="🔄 Разобрать другую жалобу", callback_data="onb:start_triage")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="open:main_menu")],
+            [InlineKeyboardButton(text="➕ Добавить напоминание", callback_data=f"petrem:add:{pet_id}")],
+            [InlineKeyboardButton(text="🩺 Новый разбор", callback_data="onb:start_triage")],
+            [InlineKeyboardButton(text=BTN_MENU, callback_data="open:main_menu")],
         ]
     )

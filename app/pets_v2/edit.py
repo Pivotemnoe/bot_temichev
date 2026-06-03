@@ -24,6 +24,7 @@ from app.db import (
     update_pet_breed,
 )
 from app.keyboards import main_menu_kb
+from app.ux import BTN_DONE, BTN_MENU, WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 router = Router(name="pets_v2_edit")
 
@@ -46,7 +47,7 @@ def _profile_menu_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Дата рождения")],
             [KeyboardButton(text="Пол")],
             [KeyboardButton(text="Порода")],
-            [KeyboardButton(text="Готово"), KeyboardButton(text="⬅️ В главное меню")],
+            [KeyboardButton(text=BTN_DONE), KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -57,7 +58,7 @@ def _cancel_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Не знаю/пропустить")],
-            [KeyboardButton(text="⬅️ В главное меню")],
+            [KeyboardButton(text=BTN_MENU)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -91,7 +92,7 @@ async def start_rename_pet(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "Введите новое имя для этого питомца.\n\n"
         "Если хотите оставить питомца без имени, отправьте один дефис «-».\n"
-        "Чтобы отменить переименование, нажмите «⬅️ В главное меню» или напишите «Отменить».",
+        "Чтобы отменить переименование, нажмите «⬅️ В меню» или отправьте /cancel.",
         reply_markup=main_menu_kb(),
     )
     await callback.answer()
@@ -115,7 +116,7 @@ async def process_new_name(message: Message, state: FSMContext):
     raw_text = (message.text or "").strip()
 
     # Отмена переименования через кнопку или текст
-    if raw_text in ("⬅️ В главное меню", "Отменить"):
+    if is_cancel_text(raw_text):
         await state.clear()
         await message.answer(
             "Переименование отменено. Вы в главном меню.",
@@ -157,6 +158,7 @@ async def process_new_name(message: Message, state: FSMContext):
         "Откройте «🐾 Мои животные», чтобы увидеть обновлённый список.",
         reply_markup=main_menu_kb(),
     )
+    await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb(int(pet_id)))
 
 
 @router.message(PetEditStates.waiting_new_name)
@@ -199,7 +201,7 @@ async def start_edit_profile(callback: CallbackQuery, state: FSMContext):
         "• Вес\n"
         "• Порода\n\n"
         "Выберите пункт в меню или введите его текстом.\n"
-        "Чтобы закончить редактирование, нажмите «Готово» или «⬅️ В главное меню».",
+        "Чтобы закончить редактирование, нажмите «Готово» или «⬅️ В меню».",
         reply_markup=_profile_menu_kb(),
     )
     await callback.answer()
@@ -212,12 +214,16 @@ async def choose_field(message: Message, state: FSMContext):
     lower = raw.lower()
 
     # Выход из режима редактирования
-    if lower in ("готово", "в главное меню", "⬅️ в главное меню", "отменить"):
+    if lower == BTN_DONE.lower() or is_cancel_text(raw):
+        data = await state.get_data()
+        pet_id = data.get("pet_id")
         await state.clear()
         await message.answer(
             "Редактирование карточки завершено. Вы в главном меню.",
             reply_markup=main_menu_kb(),
         )
+        if pet_id:
+            await message.answer(WHAT_NEXT_TEXT, reply_markup=what_next_kb(int(pet_id)))
         return
 
     if "дата" in lower:
@@ -239,7 +245,7 @@ async def choose_field(message: Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="Самец"), KeyboardButton(text="Самка")],
                 [KeyboardButton(text="Не знаю/пропустить")],
-                [KeyboardButton(text="⬅️ В главное меню")],
+                [KeyboardButton(text=BTN_MENU)],
             ],
             resize_keyboard=True,
             one_time_keyboard=True,
@@ -327,7 +333,7 @@ async def process_birth(message: Message, state: FSMContext):
 
     raw = (message.text or "").strip()
 
-    if raw in ("⬅️ В главное меню", "Отменить"):
+    if is_cancel_text(raw):
         await state.clear()
         await message.answer(
             "Редактирование карточки отменено. Вы в главном меню.",
@@ -420,7 +426,7 @@ async def process_sex(message: Message, state: FSMContext):
     raw = (message.text or "").strip()
     low = raw.lower()
 
-    if raw in ("⬅️ В главное меню", "Отменить"):
+    if is_cancel_text(raw):
         await state.clear()
         await message.answer(
             "Редактирование карточки отменено. Вы в главном меню.",
@@ -495,7 +501,7 @@ async def process_breed(message: Message, state: FSMContext):
 
     raw = (message.text or "").strip()
 
-    if raw in ("⬅️ В главное меню", "Отменить"):
+    if is_cancel_text(raw):
         await state.clear()
         await message.answer(
             "Редактирование карточки отменено. Вы в главном меню.",

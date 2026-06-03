@@ -224,8 +224,8 @@ BTN_PET_CARD_VACCINATIONS = "🛡 Прививки и обработки"
 BTN_PET_CARD_NOTES = "📝 Особенности питомца"
 BTN_PET_CARD_EDIT = "✏️ Редактировать данные"
 BTN_PET_CARD_DELETE = "🗑 Удалить питомца"
-BTN_PET_BACK_TO_LIST = "⬅️ К списку питомцев"
-BTN_BACK_MAIN_MENU = "⬅️ В главное меню"
+BTN_PET_BACK_TO_LIST = "⬅️ Назад"
+BTN_BACK_MAIN_MENU = "⬅️ В меню"
 
 # ——————————————————————
 # ДОБАВЛЕНИЕ ПИТОМЦА

@@ -23,6 +23,7 @@ from app.db import (
 )
 from app.services.pet_observation_service import add_observation
 from app.keyboards import main_menu_kb, choose_pet_kb, skip_kb
+from app.ux import BTN_MENU, WHAT_NEXT_TEXT, is_cancel_text, what_next_kb
 
 logger = logging.getLogger(__name__)
 
@@ -136,10 +137,10 @@ def _reminder_types_keyboard() -> List[List[str]]:
     Варианты типа напоминания (подписи кнопок).
     """
     return [
-        ["💉 Прививка", "🪳 Паразиты (блохи/клещи/глисты)"],
-        ["🩺 Плановый осмотр", "🍽️ Корм/диета"],
-        ["📌 Другое"],
-        ["Отменить"],
+        ["💉 Вакцинация", "🪳 Обработка от паразитов"],
+        ["🩺 Плановый осмотр", "✂️ Груминг"],
+        ["🍽️ Корм/диета", "📌 Другое"],
+        [BTN_MENU],
     ]
 
 
@@ -154,9 +155,35 @@ def _map_reminder_type(text: str) -> Tuple[str, str]:
         return "parasites", "Обработка от паразитов"
     if "осмотр" in normalized or "чекап" in normalized or "чек-ап" in normalized:
         return "checkup", "Плановый осмотр"
+    if "грум" in normalized or "стриж" in normalized:
+        return "grooming", "Груминг"
     if "корм" in normalized or "диета" in normalized:
         return "diet", "Корм / диета"
     return "custom", "Другое"
+
+
+REMINDER_TEMPLATES: dict[str, dict[str, str]] = {
+    "vaccine": {
+        "title": "Вакцинация",
+        "periodicity": "yearly",
+        "periodicity_title": "каждый год",
+    },
+    "parasites": {
+        "title": "Обработка от паразитов",
+        "periodicity": "every_3_months",
+        "periodicity_title": "каждые 3 месяца",
+    },
+    "checkup": {
+        "title": "Плановый осмотр",
+        "periodicity": "yearly",
+        "periodicity_title": "каждый год",
+    },
+    "grooming": {
+        "title": "Груминг",
+        "periodicity": "monthly",
+        "periodicity_title": "каждый месяц",
+    },
+}
 
 
 def _build_pet_options(pets: List[Dict]) -> Dict[str, int]:
@@ -289,7 +316,7 @@ async def reminders_add_start(message: Message, state: FSMContext) -> None:
 async def reminders_choose_pet(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
@@ -299,7 +326,7 @@ async def reminders_choose_pet(message: Message, state: FSMContext) -> None:
     pet_id = options.get(text)
     if not pet_id:
         await message.answer(
-            "Пожалуйста, выберите питомца из списка на клавиатуре или нажмите «Отменить».",
+            f"Пожалуйста, выберите питомца из списка на клавиатуре или нажмите «{BTN_MENU}».",
         )
         return
 
@@ -322,9 +349,10 @@ async def reminders_choose_pet(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Какой тип напоминания нужно создать?\n"
         "Выберите вариант:\n"
-        "• 💉 Прививка\n"
-        "• 🪳 Паразиты (блохи/клещи/глисты)\n"
+        "• 💉 Вакцинация\n"
+        "• 🪳 Обработка от паразитов\n"
         "• 🩺 Плановый осмотр\n"
+        "• ✂️ Груминг\n"
         "• 🍽️ Корм/диета\n"
         "• 📌 Другое",
         reply_markup=kb,
@@ -335,13 +363,34 @@ async def reminders_choose_pet(message: Message, state: FSMContext) -> None:
 async def reminders_choose_type(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
 
     reminder_type, type_title = _map_reminder_type(text)
-    await state.update_data(reminder_type=reminder_type, reminder_type_title=type_title)
+    template = REMINDER_TEMPLATES.get(reminder_type)
+    await state.update_data(
+        reminder_type=reminder_type,
+        reminder_type_title=type_title,
+        reminder_template_periodicity=(template or {}).get("periodicity"),
+        reminder_template_periodicity_title=(template or {}).get("periodicity_title"),
+    )
+
+    if template:
+        await state.update_data(reminder_title=template["title"])
+        await state.set_state(ReminderStates.entering_date)
+        await message.answer(
+            f"Шаблон: <b>{type_title}</b>\n"
+            f"Тема: {template['title']}\n"
+            f"Рекомендуемый повтор: {template['periodicity_title']}.\n\n"
+            "На какую дату поставить первое напоминание?\n\n"
+            "Допустимые форматы:\n"
+            "• 10.12.2025\n"
+            "• 10.12.25\n"
+            "• 2025-12-10",
+        )
+        return
 
     await state.set_state(ReminderStates.entering_title)
     await message.answer(
@@ -358,14 +407,14 @@ async def reminders_choose_type(message: Message, state: FSMContext) -> None:
 async def reminders_enter_title(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
 
     if not text:
         await message.answer(
-            "Пожалуйста, напишите, о чём напомнить, или нажмите «Отменить».",
+            f"Пожалуйста, напишите, о чём напомнить, или нажмите «{BTN_MENU}».",
         )
         return
 
@@ -384,7 +433,7 @@ async def reminders_enter_title(message: Message, state: FSMContext) -> None:
 async def reminders_enter_date(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
@@ -412,7 +461,7 @@ async def reminders_enter_date(message: Message, state: FSMContext) -> None:
 async def reminders_enter_time(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
@@ -434,6 +483,8 @@ async def reminders_enter_time(message: Message, state: FSMContext) -> None:
     await state.update_data(reminder_due_time=time_str)
 
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    data = await state.get_data()
+    recommended_periodicity = data.get("reminder_template_periodicity_title")
 
     rows = [
         [KeyboardButton(text="Один раз")],
@@ -441,7 +492,7 @@ async def reminders_enter_time(message: Message, state: FSMContext) -> None:
         [KeyboardButton(text="Каждые 6 месяцев")],
         [KeyboardButton(text="Каждые 3 месяца")],
         [KeyboardButton(text="Каждый месяц")],
-        [KeyboardButton(text="Отменить")],
+        [KeyboardButton(text=BTN_MENU)],
     ]
     kb = ReplyKeyboardMarkup(
         keyboard=rows,
@@ -457,7 +508,8 @@ async def reminders_enter_time(message: Message, state: FSMContext) -> None:
         "• Каждый год\n"
         "• Каждые 6 месяцев\n"
         "• Каждые 3 месяца\n"
-        "• Каждый месяц",
+        "• Каждый месяц"
+        + (f"\n\nРекомендация для шаблона: <b>{recommended_periodicity}</b>." if recommended_periodicity else ""),
         reply_markup=kb,
     )
 
@@ -466,7 +518,7 @@ async def reminders_enter_time(message: Message, state: FSMContext) -> None:
 async def reminders_choose_periodicity(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
-    if text in ("Отменить", "⬅️ В главное меню"):
+    if is_cancel_text(text):
         await state.clear()
         await message.answer(REMINDERS_CANCELLED, reply_markup=main_menu_kb())
         return
@@ -475,7 +527,7 @@ async def reminders_choose_periodicity(message: Message, state: FSMContext) -> N
     if periodicity is None:
         await message.answer(
             "Не удалось определить периодичность.\n"
-            "Пожалуйста, выберите вариант с клавиатуры или нажмите «Отменить».",
+            f"Пожалуйста, выберите вариант с клавиатуры или нажмите «{BTN_MENU}».",
         )
         return
 
@@ -540,7 +592,12 @@ async def reminders_choose_periodicity(message: Message, state: FSMContext) -> N
         f"Тип: {reminder_type_title}\n"
         f"Тема: {title}\n"
         f"Дата: {due_date}{time_part}\n"
-        f"Повтор: {text}",
+        f"Повтор: {text}\n\n"
+        f"{WHAT_NEXT_TEXT}",
+        reply_markup=what_next_kb(int(pet_id)) if pet_id else what_next_kb(),
+    )
+    await message.answer(
+        "Можно открыть карточку питомца, добавить ещё одно напоминание или начать новый разбор.",
         reply_markup=main_menu_kb(),
     )
     await state.clear()
@@ -586,6 +643,7 @@ async def reminders_list(message: Message, state: FSMContext) -> None:
             "parasites": "Обработка от паразитов",
             "checkup": "Плановый осмотр",
             "diet": "Корм / диета",
+            "grooming": "Груминг",
             "custom": "Другое",
         }.get(rtype, rtype)
 

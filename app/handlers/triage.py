@@ -56,6 +56,7 @@ from app.services.analytics import (
     prompt_mode_for_context,
     track_event,
 )
+from app.ux import WHAT_NEXT_TEXT, is_cancel_text
 
 
 
@@ -160,8 +161,7 @@ def _pet_label(pet: Dict) -> str:
 
 
 def _is_cancel(text: str) -> bool:
-    t = (text or "").strip().lower()
-    return t in {"отменить", "⬅️ в главное меню".lower()}
+    return is_cancel_text(text)
 
 
 def _triage_start_payload(user: dict, pet_id: int) -> dict:
@@ -433,7 +433,7 @@ async def triage_get_complaint(message: Message, state: FSMContext):
     await message.answer(safe_response_text, reply_markup=main_menu_kb())
     if pet_id:
         await message.answer(
-            "Разбор сохранён в историю питомца.",
+            "Разбор сохранён в историю питомца.\n\n" + WHAT_NEXT_TEXT,
             reply_markup=triage_done_kb(int(pet_id)),
         )
 

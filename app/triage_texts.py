@@ -171,7 +171,7 @@ BTN_TRIAGE_SAVE_HISTORY = "💾 Сохранить в историю"
 BTN_TRIAGE_CREATE_REMINDER = "⏰ Создать напоминание"
 BTN_TRIAGE_OPEN_PET_CARD = "🐾 Открыть карту питомца"
 BTN_TRIAGE_NEW_TRIAGE = "🔁 Новый разбор жалобы"
-BTN_TRIAGE_MAIN_MENU = "⬅️ В главное меню"
+BTN_TRIAGE_MAIN_MENU = "⬅️ В меню"
 
 # ——————————————————————
 # ПОДПИСИ ДЛЯ INLINE-КНОПОК FOLLOW-UP
@@ -187,7 +187,7 @@ BTN_TRIAGE_FOLLOWUP_CANCEL = "✖️ Не нужно напоминание"
 
 BTN_TRIAGE_SHOW_PLANS = "📋 Доступные планы"
 BTN_TRIAGE_UPGRADE_PLAN = "⬆️ Увеличить лимиты"
-BTN_TRIAGE_LIMIT_BACK_MENU = "⬅️ В главное меню"
+BTN_TRIAGE_LIMIT_BACK_MENU = "⬅️ В меню"
 
 # ——————————————————————
 # ДОПОЛНИТЕЛЬНОЕ

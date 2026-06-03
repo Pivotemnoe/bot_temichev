@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from app.db import get_user_by_telegram_id, delete_pet
 from app.keyboards import main_menu_kb
+from app.ux import BTN_BACK, BTN_MENU
 
 router = Router(name="pets_v2_delete")
 
@@ -16,9 +17,9 @@ def _confirm_delete_kb(pet_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"pet:delete_confirm:{pet_id}"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"pet:delete_cancel:{pet_id}"),
+                InlineKeyboardButton(text=BTN_BACK, callback_data=f"pet:delete_cancel:{pet_id}"),
             ],
-            [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="pet:back_to_menu")],
+            [InlineKeyboardButton(text=BTN_MENU, callback_data="pet:back_to_menu")],
         ]
     )
 
