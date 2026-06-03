@@ -5,6 +5,7 @@ import logging
 from logging import StreamHandler, FileHandler, Formatter
 
 from app.middlewares.trace import HandlerTraceMiddleware
+from app.middlewares.rate_limit import RateLimitMiddleware
 logging.getLogger("aiogram").setLevel(logging.DEBUG)
 
 from aiogram import Bot, Dispatcher
@@ -102,6 +103,8 @@ async def main():
     dp.include_router(feedback_router)
     dp.include_router(menu_router)
     dp.include_router(knowledge_router)
+    dp.message.middleware(RateLimitMiddleware())
+    dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(HandlerTraceMiddleware())
     dp.callback_query.middleware(HandlerTraceMiddleware())
     

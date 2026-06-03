@@ -36,6 +36,7 @@ REQUIRED_TABLES = {
     "triage_logs",
     "triage_followups",
     "reminders",
+    "admin_audit_log",
 }
 
 

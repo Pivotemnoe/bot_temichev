@@ -4,6 +4,7 @@ import csv
 import html
 import io
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -11,8 +12,16 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from app.config import ADMIN_CHAT_ID, ADMIN_IDS
-from app.db import get_admin_dashboard_stats
+from app.config import (
+    ADMIN_CHAT_ID,
+    ADMIN_IDS,
+    DB_PATH,
+    ENVIRONMENT,
+    FEEDBACK_CHAT_ID,
+    YOOKASSA_SECRET_KEY,
+    YOOKASSA_SHOP_ID,
+)
+from app.db import get_admin_dashboard_stats, list_admin_audit_events, log_admin_audit_event
 
 
 router = Router(name="admin")
@@ -43,9 +52,32 @@ def _admin_attempt_user_label(user) -> str:
     return " ".join(parts)
 
 
+def _user_audit_identity(user) -> tuple[int | None, str | None]:
+    if user is None:
+        return None, None
+    telegram_id = getattr(user, "id", None)
+    username = getattr(user, "username", None)
+    return (int(telegram_id) if telegram_id else None, str(username) if username else None)
+
+
+def _log_admin_event(user, action: str, *, target: str | None = None, details: dict | str | None = None) -> None:
+    telegram_id, username = _user_audit_identity(user)
+    try:
+        log_admin_audit_event(
+            telegram_id=telegram_id,
+            username=username,
+            action=action,
+            target=target,
+            details=details,
+        )
+    except Exception:
+        logger.exception("Failed to write admin audit event action=%s target=%s", action, target)
+
+
 async def _report_denied_admin_attempt(*, bot, user, source: str) -> None:
     telegram_id = int(getattr(user, "id", 0) or 0)
     logger.warning("Denied admin access source=%s user=%s", source, _admin_attempt_user_label(user))
+    _log_admin_event(user, "admin_denied", target=source)
 
     if not ADMIN_CHAT_ID or not telegram_id:
         return
@@ -84,6 +116,10 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🧾 Расходы", callback_data="admin:costs:7"),
             ],
             [InlineKeyboardButton(text="🔗 Источники", callback_data="admin:sources:30")],
+            [
+                InlineKeyboardButton(text="🛡 Аудит", callback_data="admin:audit:30"),
+                InlineKeyboardButton(text="⚙️ Статус", callback_data="admin:status:now"),
+            ],
             [InlineKeyboardButton(text="⬇️ Экспорт CSV", callback_data="admin:export:30")],
         ]
     )
@@ -310,6 +346,44 @@ def render_admin_sources_report(label: str, date_from: str, date_to: str) -> str
     return "\n".join(lines)
 
 
+def render_admin_audit_report(label: str, date_from: str, date_to: str) -> str:
+    events = list_admin_audit_events(limit=20)
+    lines = [f"<b>🛡 Админ-аудит — {html.escape(label)}</b>", ""]
+    if not events:
+        lines.append("Событий пока нет.")
+        return "\n".join(lines)
+
+    for event in events:
+        created_at = str(event.get("created_at") or "")[:19].replace("T", " ")
+        telegram_id = event.get("telegram_id") or "?"
+        username = f"@{event.get('username')}" if event.get("username") else "без username"
+        action = html.escape(str(event.get("action") or "unknown"))
+        target = html.escape(str(event.get("target") or ""))
+        suffix = f" → {target}" if target else ""
+        lines.append(f"• {created_at} — {telegram_id} ({username}): {action}{suffix}")
+    return "\n".join(lines)
+
+
+def render_admin_status_report() -> str:
+    db_exists = bool(DB_PATH and os.path.exists(DB_PATH))
+    db_size = os.path.getsize(DB_PATH) if db_exists else 0
+    yookassa_configured = bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+    lines = [
+        "<b>⚙️ Статус системы</b>",
+        "",
+        f"Окружение: <b>{html.escape(ENVIRONMENT)}</b>",
+        f"Администраторов: <b>{len(ADMIN_IDS)}</b>",
+        f"Чат уведомлений: <b>{'настроен' if ADMIN_CHAT_ID else 'не настроен'}</b>",
+        f"Чат обратной связи: <b>{'настроен' if FEEDBACK_CHAT_ID else 'не настроен'}</b>",
+        f"YooKassa: <b>{'настроена' if yookassa_configured else 'не настроена'}</b>",
+        f"База: <b>{'найдена' if db_exists else 'не найдена'}</b>",
+        f"Размер базы: <b>{db_size} байт</b>",
+        "",
+        "Секреты, токены и ключи здесь не показываются.",
+    ]
+    return "\n".join(lines)
+
+
 def render_admin_csv_export(label: str, date_from: str, date_to: str) -> bytes:
     stats = get_admin_dashboard_stats(date_from, date_to)
     rows: list[list[str | int | float]] = []
@@ -389,6 +463,7 @@ async def admin_menu(message: Message) -> None:
         await _report_denied_admin_attempt(bot=message.bot, user=message.from_user, source="message:admin")
         await message.answer(ADMIN_DENIED_TEXT)
         return
+    _log_admin_event(message.from_user, "admin_open", target="message")
     await message.answer("<b>Админ-панель TemichevVet</b>", reply_markup=_admin_menu_kb())
 
 
@@ -402,6 +477,15 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
     parts = (callback.data or "").split(":")
     report = parts[1] if len(parts) > 1 else "period"
     arg = parts[2] if len(parts) > 2 else "7"
+    _log_admin_event(callback.from_user, "admin_callback", target=report, details={"arg": arg})
+
+    if report == "status":
+        text = render_admin_status_report()
+        if callback.message:
+            await callback.message.answer(text, reply_markup=_admin_menu_kb())
+        await callback.answer()
+        return
+
     label, date_from, date_to = _period_bounds(arg)
 
     if report == "period":
@@ -416,6 +500,8 @@ async def admin_callbacks(callback: CallbackQuery) -> None:
         text = render_admin_costs_report(label, date_from, date_to)
     elif report == "sources":
         text = render_admin_sources_report(label, date_from, date_to)
+    elif report == "audit":
+        text = render_admin_audit_report(label, date_from, date_to)
     elif report == "export":
         if callback.message:
             csv_file = BufferedInputFile(

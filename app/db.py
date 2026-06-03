@@ -177,6 +177,21 @@ def init_db():
             """
         )
 
+        # =================== Admin security audit ===================
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER,
+                username TEXT,
+                action TEXT NOT NULL,
+                target TEXT,
+                details TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
         # =================== Pet Card V2 tables ===================
         cur.execute(
             """
@@ -319,12 +334,86 @@ def init_db():
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_provider_status ON payments(provider, status)"
         )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log(created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_audit_telegram_created ON admin_audit_log(telegram_id, created_at)"
+        )
 
         conn.commit()
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ===== Админ-аудит =====
+
+
+def log_admin_audit_event(
+    *,
+    telegram_id: int | None,
+    username: str | None,
+    action: str,
+    target: str | None = None,
+    details: dict | str | None = None,
+) -> int:
+    """Записать security-событие админки без секретов."""
+    if isinstance(details, dict):
+        details_text = json.dumps(details, ensure_ascii=False, sort_keys=True)
+    elif details is None:
+        details_text = None
+    else:
+        details_text = str(details)
+
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO admin_audit_log (telegram_id, username, action, target, details, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(telegram_id) if telegram_id else None,
+                username,
+                action,
+                target,
+                details_text,
+                _utc_now_iso(),
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def list_admin_audit_events(limit: int = 20) -> list[dict]:
+    """Последние события админ-аудита."""
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, telegram_id, username, action, target, details, created_at
+            FROM admin_audit_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "telegram_id": row[1],
+            "username": row[2],
+            "action": row[3],
+            "target": row[4],
+            "details": row[5],
+            "created_at": row[6],
+        }
+        for row in rows
+    ]
 
 
 # ===== Пользователи =====
