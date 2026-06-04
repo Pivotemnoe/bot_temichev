@@ -3,6 +3,7 @@
 import os
 import logging
 
+import aiohttp
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -11,6 +12,8 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     FSInputFile,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
 )
 
 from app.start_texts import START_WELCOME, START_NEED_REGISTER, START_RETURNING_USER
@@ -46,6 +49,72 @@ logger = logging.getLogger(__name__)
 # Абсолютный путь к каталогу static рядом с app/
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+
+def _pwa_return_kb(pwa_base_url: str) -> InlineKeyboardMarkup | None:
+    if not pwa_base_url:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Вернуться на сайт", url=pwa_base_url)],
+        ]
+    )
+
+
+async def _complete_pwa_web_auth(message: Message, state_token: str) -> bool:
+    """Confirm PWA Telegram login for deep links like /start web_auth_<state>."""
+    state_token = (state_token or "").strip()
+    pwa_base_url = (os.getenv("PWA_BASE_URL") or "").strip().rstrip("/")
+    auth_secret = (os.getenv("PWA_TELEGRAM_AUTH_SECRET") or "").strip()
+    if not state_token:
+        await message.answer("Не удалось прочитать код входа. Вернитесь на сайт и нажмите Telegram ещё раз.")
+        return True
+    if not pwa_base_url or not auth_secret:
+        await message.answer(
+            "Вход на сайте через Telegram пока настраивается.\n\n"
+            "Для сайта попробуйте вход по email. Сам Telegram-бот работает отдельно через меню.",
+        )
+        return True
+
+    user = message.from_user
+    display_name = " ".join(part for part in [user.first_name, user.last_name] if part) or user.username or str(user.id)
+    payload = {
+        "state": state_token,
+        "telegram_id": str(user.id),
+        "display_name": display_name,
+        "username": user.username,
+    }
+    headers = {"X-TemichevVet-Telegram-Secret": auth_secret}
+    url = f"{pwa_base_url}/api/auth/telegram/complete"
+    try:
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    logger.warning("PWA Telegram auth failed status=%s", response.status)
+                    await message.answer(
+                        "Код входа на сайте не подтверждён. Возможно, он устарел.\n\n"
+                        "Это было только подтверждение входа, работа в Telegram-боте не начинается. "
+                        "Вернитесь на сайт и нажмите «Войти через Telegram» ещё раз.",
+                        reply_markup=_pwa_return_kb(pwa_base_url),
+                    )
+                    return True
+    except Exception:
+        logger.exception("Failed to confirm PWA Telegram auth")
+        await message.answer(
+            "Сайт временно не ответил на подтверждение входа.\n\n"
+            "Попробуйте ещё раз через минуту или войдите на сайте по email.",
+            reply_markup=_pwa_return_kb(pwa_base_url),
+        )
+        return True
+
+    await message.answer(
+        "Вход в личный кабинет TemichevVet подтверждён.\n\n"
+        "Telegram использован только для подтверждения личности. "
+        "Вернитесь на сайт или в PWA — кабинет откроется автоматически.",
+        reply_markup=_pwa_return_kb(pwa_base_url),
+    )
+    return True
 
 
 def _welcome_kb() -> ReplyKeyboardMarkup:
@@ -184,7 +253,12 @@ async def cmd_start(message: Message, state: FSMContext):
     """
     tg_id = message.from_user.id
     user = get_user_by_telegram_id(tg_id)
-    start_arg = _get_start_arg(message).lower()
+    raw_start_arg = _get_start_arg(message)
+    if raw_start_arg.startswith("web_auth_"):
+        await _complete_pwa_web_auth(message, raw_start_arg.removeprefix("web_auth_"))
+        await state.clear()
+        return
+    start_arg = raw_start_arg.lower()
     start_payload = parse_start_payload(start_arg)
     from_channel = start_arg in {"promo", "channel", "from_channel"}
 
