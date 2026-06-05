@@ -29,7 +29,7 @@ from app.handlers.feedback import router as feedback_router
 from app.handlers.unsubscribe import router as unsubscribe_router  # ⬅️ ДОБАВЛЕНО
 from app.services.reminders_runner import run_reminders_worker
 from app.services.followup_runner import run_followups_worker
-from app.services.core_sync import run_core_sync_worker
+from app.services.core_sync import run_core_pull_worker, run_core_sync_worker
 from app.services.selftest import run_selftest
 
 
@@ -115,6 +115,7 @@ async def main():
     asyncio.create_task(run_reminders_worker(bot))
     asyncio.create_task(run_followups_worker(bot))
     asyncio.create_task(run_core_sync_worker())
+    asyncio.create_task(run_core_pull_worker())
 
     print(
         "TemichevVet Bot v3 — запущен "

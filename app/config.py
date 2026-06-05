@@ -137,3 +137,20 @@ try:
     CORE_SYNC_BATCH_SIZE = max(1, min(500, int(os.getenv("CORE_SYNC_BATCH_SIZE", "100"))))
 except ValueError:
     CORE_SYNC_BATCH_SIZE = 100
+
+CORE_PULL_ENABLED = os.getenv("CORE_PULL_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+try:
+    CORE_PULL_INTERVAL_SECONDS = max(5, int(os.getenv("CORE_PULL_INTERVAL_SECONDS", "10")))
+except ValueError:
+    CORE_PULL_INTERVAL_SECONDS = 10
+
+try:
+    CORE_PULL_BATCH_SIZE = max(1, min(500, int(os.getenv("CORE_PULL_BATCH_SIZE", "100"))))
+except ValueError:
+    CORE_PULL_BATCH_SIZE = 100
