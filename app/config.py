@@ -112,3 +112,28 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Возможность писать ошибки в файл (серверная конфигурация)
 ERROR_LOG_PATH = os.getenv("ERROR_LOG_PATH", "")
+
+# -----------------------------
+# ЗАКРЫТЫЙ CORE API (RU storage bridge)
+# -----------------------------
+# Telegram-бот живёт на NL, но изменения данных может зеркалировать
+# в закрытый Core API на RU. Токен не должен попадать во фронт.
+
+CORE_API_URL = os.getenv("CORE_API_URL", "").strip().rstrip("/")
+CORE_API_TOKEN = os.getenv("CORE_API_TOKEN", "").strip()
+CORE_SYNC_ENABLED = os.getenv("CORE_SYNC_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+try:
+    CORE_SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("CORE_SYNC_INTERVAL_SECONDS", "10")))
+except ValueError:
+    CORE_SYNC_INTERVAL_SECONDS = 10
+
+try:
+    CORE_SYNC_BATCH_SIZE = max(1, min(500, int(os.getenv("CORE_SYNC_BATCH_SIZE", "100"))))
+except ValueError:
+    CORE_SYNC_BATCH_SIZE = 100
